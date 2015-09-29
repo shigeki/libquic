@@ -708,3 +708,23 @@ index e3cabbc..ffe5a14 100644
  #include "net/spdy/spdy_protocol.h"
  
  // TODO(akalin): Remove support for CREDENTIAL frames.
+diff --git a/src/net/spdy/spdy_header_block.cc b/src/net/spdy/spdy_header_block.cc
+index d12ab70..62be40c 100644
+--- a/src/net/spdy/spdy_header_block.cc
++++ b/src/net/spdy/spdy_header_block.cc
+@@ -211,6 +211,7 @@ scoped_ptr<base::Value> SpdyHeaderBlockNetLogCallback(
+     NetLogCaptureMode capture_mode) {
+   scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+   base::DictionaryValue* headers_dict = new base::DictionaryValue();
++  /* No NetLog callback is made on libquic
+   for (SpdyHeaderBlock::const_iterator it = headers->begin();
+        it != headers->end(); ++it) {
+     headers_dict->SetWithoutPathExpansion(
+@@ -218,6 +219,7 @@ scoped_ptr<base::Value> SpdyHeaderBlockNetLogCallback(
+         new base::StringValue(ElideHeaderValueForNetLog(
+             capture_mode, it->first.as_string(), it->second.as_string())));
+   }
++  */
+   dict->Set("headers", headers_dict);
+   return dict.Pass();
+ }
