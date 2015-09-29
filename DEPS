@@ -255,9 +255,7 @@
         }
     ],
     "patches": [
-        "patch/basepatch.patch",
-        "patch/nss_util.patch",
-        "patch/retrasmitoldestpacket_fatal_fix.patch"
+        "patch/basepatch.patch"
     ],
     "custom_files": [
         {"from": "custom/net_util.h", "to": "net/base/net_util.h"},
