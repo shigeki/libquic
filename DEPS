@@ -3,7 +3,7 @@
 
 # START #
 {
-    "chromium_revision": "394674f77ff069853d0df59918e23bd13ef3861f",
+    "chromium_revision": "0bf375d09e9faeb59e76a91250f33571c982d10e",
     "automatic_dependency": [
         {
             "from": "net/quic/quic_connection.cc",
@@ -155,7 +155,6 @@
                 "LICENSE",
                 "AUTHORS",
                 "base/atomicops_internals_portable.*",
-                "base/atomicops_internals_x86_gcc.*",
                 "base/callback_helpers.h",
                 "base/callback_helpers.cc",
                 "base/cancelable_callback.h",

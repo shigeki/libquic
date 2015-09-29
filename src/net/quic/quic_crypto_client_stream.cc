@@ -5,9 +5,7 @@
 #include "net/quic/quic_crypto_client_stream.h"
 
 #include "base/metrics/histogram_macros.h"
-#if 0
 #include "base/profiler/scoped_tracker.h"
-#endif
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/crypto/crypto_utils.h"
 #include "net/quic/crypto/null_encrypter.h"
@@ -173,13 +171,6 @@ void QuicCryptoClientStream::HandleServerConfigUpdateMessage(
   next_state_ = STATE_INITIALIZE_SCUP;
   DoHandshakeLoop(nullptr);
 }
-
-// kMaxClientHellos is the maximum number of times that we'll send a client
-// hello. The value 3 accounts for:
-//   * One failure due to an incorrect or missing source-address token.
-//   * One failure due the server's certificate chain being unavailible and the
-//     server being unwilling to send it without a valid source-address token.
-static const int kMaxClientHellos = 3;
 
 void QuicCryptoClientStream::DoHandshakeLoop(
     const CryptoHandshakeMessage* in) {
@@ -365,12 +356,10 @@ void QuicCryptoClientStream::DoSendCHLO(
 void QuicCryptoClientStream::DoReceiveREJ(
     const CryptoHandshakeMessage* in,
     QuicCryptoClientConfig::CachedState* cached) {
-#if 0
   // TODO(rtenneti): Remove ScopedTracker below once crbug.com/422516 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "422516 QuicCryptoClientStream::DoReceiveREJ"));
-#endif
 
   // We sent a dummy CHLO because we didn't have enough information to
   // perform a handshake, or we sent a full hello that the server
@@ -423,14 +412,9 @@ QuicAsyncStatus QuicCryptoClientStream::DoVerifyProof(
   verify_ok_ = false;
 
   QuicAsyncStatus status = verifier->VerifyProof(
-      server_id_.host(),
-      cached->server_config(),
-      cached->certs(),
-      cached->signature(),
-      verify_context_.get(),
-      &verify_error_details_,
-      &verify_details_,
-      proof_verify_callback);
+      server_id_.host(), cached->server_config(), cached->certs(),
+      cached->signature(), verify_context_.get(), &verify_error_details_,
+      &verify_details_, proof_verify_callback);
 
   switch (status) {
     case QUIC_PENDING:

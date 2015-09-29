@@ -25,8 +25,7 @@ class QuicHeadersStream::SpdyFramerVisitor
     : public SpdyFramerVisitorInterface,
       public SpdyFramerDebugVisitorInterface {
  public:
-  SpdyFramerVisitor(SpdyMajorVersion spdy_version, QuicHeadersStream* stream)
-      : spdy_version_(spdy_version), stream_(stream) {}
+  explicit SpdyFramerVisitor(QuicHeadersStream* stream) : stream_(stream) {}
 
   // SpdyFramerVisitorInterface implementation
   void OnSynStream(SpdyStreamId stream_id,
@@ -109,6 +108,8 @@ class QuicHeadersStream::SpdyFramerVisitor
   void OnHeaders(SpdyStreamId stream_id,
                  bool has_priority,
                  SpdyPriority priority,
+                 SpdyStreamId parent_stream_id,
+                 bool exclusive,
                  bool fin,
                  bool end) override {
     if (!stream_->IsConnected()) {
@@ -121,8 +122,7 @@ class QuicHeadersStream::SpdyFramerVisitor
     }
   }
 
-  void OnWindowUpdate(SpdyStreamId stream_id,
-                      uint32 delta_window_size) override {
+  void OnWindowUpdate(SpdyStreamId stream_id, int delta_window_size) override {
     CloseConnection("SPDY WINDOW_UPDATE frame received.");
   }
 
@@ -163,7 +163,6 @@ class QuicHeadersStream::SpdyFramerVisitor
   }
 
  private:
-  SpdyMajorVersion spdy_version_;
   QuicHeadersStream* stream_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdyFramerVisitor);
@@ -176,7 +175,7 @@ QuicHeadersStream::QuicHeadersStream(QuicSpdySession* session)
       fin_(false),
       frame_len_(0),
       spdy_framer_(HTTP2),
-      spdy_framer_visitor_(new SpdyFramerVisitor(HTTP2, this)) {
+      spdy_framer_visitor_(new SpdyFramerVisitor(this)) {
   spdy_framer_.set_visitor(spdy_framer_visitor_.get());
   spdy_framer_.set_debug_visitor(spdy_framer_visitor_.get());
   // The headers stream is exempt from connection level flow control.
@@ -192,7 +191,7 @@ size_t QuicHeadersStream::WriteHeaders(
     QuicPriority priority,
     QuicAckNotifier::DelegateInterface* ack_notifier_delegate) {
   SpdyHeadersIR headers_frame(stream_id);
-  headers_frame.set_name_value_block(headers);
+  headers_frame.set_header_block(headers);
   headers_frame.set_fin(fin);
   if (session()->perspective() == Perspective::IS_CLIENT) {
     headers_frame.set_has_priority(true);
@@ -205,9 +204,23 @@ size_t QuicHeadersStream::WriteHeaders(
   return frame->size();
 }
 
-uint32 QuicHeadersStream::ProcessRawData(const char* data,
-                                         uint32 data_len) {
-  return spdy_framer_.ProcessInput(data, data_len);
+void QuicHeadersStream::OnDataAvailable() {
+  char buffer[1024];
+  struct iovec iov;
+  while (true) {
+    iov.iov_base = buffer;
+    iov.iov_len = arraysize(buffer);
+    if (sequencer()->GetReadableRegions(&iov, 1) != 1) {
+      // No more data to read.
+      break;
+    }
+    if (spdy_framer_.ProcessInput(static_cast<char*>(iov.iov_base),
+                                  iov.iov_len) != iov.iov_len) {
+      // Error processing data.
+      return;
+    }
+    sequencer()->MarkConsumed(iov.iov_len);
+  }
 }
 
 QuicPriority QuicHeadersStream::EffectivePriority() const { return 0; }

@@ -16,9 +16,7 @@
 #include "base/logging.h"
 #include "base/mac/mach_logging.h"
 #include "base/threading/thread_id_name_manager.h"
-#if 0
 #include "base/tracked_objects.h"
-#endif
 
 namespace base {
 
@@ -46,9 +44,7 @@ void InitThreading() {
 // static
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
-#if 0
   tracked_objects::ThreadData::InitializeThreadContext(name);
-#endif
 
   // Mac OS X does not expose the length limit of the name, so
   // hardcode it.
@@ -159,10 +155,10 @@ void SetPriorityRealtimeAudio(mach_port_t mach_thread_id) {
 }  // anonymous namespace
 
 // static
-void PlatformThread::SetThreadPriority(PlatformThreadHandle handle,
-                                       ThreadPriority priority) {
+void PlatformThread::SetCurrentThreadPriority(ThreadPriority priority) {
   // Convert from pthread_t to mach thread identifier.
-  mach_port_t mach_thread_id = pthread_mach_thread_np(handle.platform_handle());
+  mach_port_t mach_thread_id =
+      pthread_mach_thread_np(PlatformThread::CurrentHandle().platform_handle());
 
   switch (priority) {
     case ThreadPriority::NORMAL:
@@ -178,7 +174,7 @@ void PlatformThread::SetThreadPriority(PlatformThreadHandle handle,
 }
 
 // static
-ThreadPriority PlatformThread::GetThreadPriority(PlatformThreadHandle handle) {
+ThreadPriority PlatformThread::GetCurrentThreadPriority() {
   NOTIMPLEMENTED();
   return ThreadPriority::NORMAL;
 }

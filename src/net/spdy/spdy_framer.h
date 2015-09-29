@@ -5,25 +5,19 @@
 #ifndef NET_SPDY_SPDY_FRAMER_H_
 #define NET_SPDY_SPDY_FRAMER_H_
 
-#include <list>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "base/basictypes.h"
-#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/sys_byteorder.h"
 #include "net/base/net_export.h"
-#include "net/spdy/hpack_decoder.h"
-#include "net/spdy/hpack_encoder.h"
+#include "net/spdy/hpack/hpack_decoder.h"
+#include "net/spdy/hpack/hpack_encoder.h"
 #include "net/spdy/spdy_alt_svc_wire_format.h"
-#if 0
 #include "net/spdy/spdy_header_block.h"
-#endif
 #include "net/spdy/spdy_protocol.h"
 
 // TODO(akalin): Remove support for CREDENTIAL frames.
@@ -50,10 +44,6 @@ class TestSpdyVisitor;
 class SpdyFramerPeer;
 
 }  // namespace test
-
-// A datastructure for holding a set of headers from a HEADERS, PUSH_PROMISE,
-// SYN_STREAM, or SYN_REPLY frame.
-typedef std::map<std::string, std::string> SpdyHeaderBlock;
 
 // A datastructure for holding the ID and flag fields for SETTINGS.
 // Conveniently handles converstion to/from wire format.
@@ -82,41 +72,6 @@ class NET_EXPORT_PRIVATE SettingsFlagsAndId {
 // SettingsMap has unique (flags, value) pair for given SpdySettingsIds ID.
 typedef std::pair<SpdySettingsFlags, uint32> SettingsFlagsAndValue;
 typedef std::map<SpdySettingsIds, SettingsFlagsAndValue> SettingsMap;
-
-// Scratch space necessary for processing SETTINGS frames.
-struct NET_EXPORT_PRIVATE SpdySettingsScratch {
-  SpdySettingsScratch() { Reset(); }
-
-  void Reset() {
-    setting_buf_len = 0;
-    last_setting_id = -1;
-  }
-
-  // Buffer contains up to one complete key/value pair.
-  char setting_buf[8];
-
-  // The amount of the buffer that is filled with valid data.
-  size_t setting_buf_len;
-
-  // The ID of the last setting that was processed in the current SETTINGS
-  // frame. Used for detecting out-of-order or duplicate keys within a settings
-  // frame. Set to -1 before first key/value pair is processed.
-  int last_setting_id;
-};
-
-// Scratch space necessary for processing ALTSVC frames.
-struct NET_EXPORT_PRIVATE SpdyAltSvcScratch {
-  SpdyAltSvcScratch();
-  ~SpdyAltSvcScratch();
-
-  void Reset() {
-    buffer.reset();
-    buffer_length = 0;
-  }
-
-  scoped_ptr<char[]> buffer;
-  size_t buffer_length = 0;
-};
 
 // SpdyFramerVisitorInterface is a set of callbacks for the SpdyFramer.
 // Implement this interface to receive event callbacks as frames are
@@ -225,15 +180,30 @@ class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
   // Called when a HEADERS frame is received.
   // Note that header block data is not included. See
   // OnControlFrameHeaderData().
+  // |stream_id| The stream receiving the header.
+  // |has_priority| Whether or not the headers frame included a priority value,
+  //     and, if protocol version >= HTTP2, stream dependency info.
+  // |priority| If |has_priority| is true and protocol version > SPDY3,
+  //     priority value for the receiving stream, else 0.
+  // |parent_stream_id| If |has_priority| is true and protocol
+  //     version >= HTTP2, the parent stream of the receiving stream, else 0.
+  // |exclusive| If |has_priority| is true and protocol
+  //     version >= HTTP2, the exclusivity of dependence on the parent stream,
+  //     else false.
+  // |fin| Whether FIN flag is set in frame headers.
+  // |end| False if HEADERs frame is to be followed by a CONTINUATION frame,
+  //     or true if not.
   virtual void OnHeaders(SpdyStreamId stream_id,
                          bool has_priority,
                          SpdyPriority priority,
+                         SpdyStreamId parent_stream_id,
+                         bool exclusive,
                          bool fin,
                          bool end) = 0;
 
   // Called when a WINDOW_UPDATE frame has been parsed.
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              uint32 delta_window_size) = 0;
+                              int delta_window_size) = 0;
 
   // Called when a goaway frame opaque data is available.
   // |goaway_data| A buffer containing the opaque GOAWAY data chunk received.
@@ -322,8 +292,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   //                and avoid exposing through the header.  (Needed for test)
   enum SpdyState {
     SPDY_ERROR,
-    SPDY_RESET,
-    SPDY_AUTO_RESET,
+    SPDY_READY_FOR_FRAME,  // Framer is ready for reading the next frame.
+    SPDY_FRAME_COMPLETE,  // Framer has finished reading a frame, need to reset.
     SPDY_READING_COMMON_HEADER,
     SPDY_CONTROL_FRAME_PAYLOAD,
     SPDY_READ_DATA_FRAME_PADDING_LENGTH,
@@ -392,6 +362,15 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // If this is called multiple times, only the last visitor will be used.
   void set_debug_visitor(SpdyFramerDebugVisitorInterface* debug_visitor) {
     debug_visitor_ = debug_visitor;
+  }
+
+  // Sets whether or not ProcessInput returns after finishing a frame, or
+  // continues processing additional frames. Normally ProcessInput processes
+  // all input, but this method enables the caller (and visitor) to work with
+  // a single frame at a time (or that portion of the frame which is provided
+  // as input). Reset() does not change the value of this flag.
+  void set_process_single_input_frame(bool v) {
+    process_single_input_frame_ = v;
   }
 
   // Pass data into the framer for parsing.
@@ -592,6 +571,37 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   friend class test::SpdyFramerPeer;
 
  private:
+  class CharBuffer {
+   public:
+    explicit CharBuffer(size_t capacity);
+    ~CharBuffer();
+
+    void CopyFrom(const char* data, size_t size);
+    void Rewind();
+
+    const char* data() const { return buffer_.get(); }
+    size_t len() const { return len_; }
+
+   private:
+    scoped_ptr<char[]> buffer_;
+    size_t capacity_;
+    size_t len_;
+  };
+
+  // Scratch space necessary for processing SETTINGS frames.
+  struct SpdySettingsScratch {
+    SpdySettingsScratch();
+    void Reset();
+
+    // Buffer contains up to one complete key/value pair.
+    CharBuffer buffer;
+
+    // The ID of the last setting that was processed in the current SETTINGS
+    // frame. Used for detecting out-of-order or duplicate keys within a
+    // settings frame. Set to -1 before first key/value pair is processed.
+    int last_setting_id;
+  };
+
   // Internal breakouts from ProcessInput. Each returns the number of bytes
   // consumed from the data.
   size_t ProcessCommonHeader(const char* data, size_t len);
@@ -613,11 +623,12 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   size_t ProcessIgnoredControlFramePayload(/*const char* data,*/ size_t len);
 
   // TODO(jgraettinger): To be removed with migration to
-  // SpdyHeadersHandlerInterface.
-  // Serializes the last-processed header block of |hpack_decoder_| as
-  // a SPDY3 format block, and delivers it to the visitor via reentrant
-  // call to ProcessControlFrameHeaderBlock().
-  void DeliverHpackBlockAsSpdy3Block();
+  // SpdyHeadersHandlerInterface.  Serializes the last-processed
+  // header block of |hpack_decoder_| as a SPDY3 format block, and
+  // delivers it to the visitor via reentrant call to
+  // ProcessControlFrameHeaderBlock().  |compressed_len| is used for
+  // logging compression percentage.
+  void DeliverHpackBlockAsSpdy3Block(size_t compressed_len);
 
   // Helpers for above internal breakouts from ProcessInput.
   void ProcessControlFrameHeader(int control_frame_type_field);
@@ -663,14 +674,13 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void WriteHeaderBlockToZ(const SpdyHeaderBlock* headers,
                            z_stream* out) const;
 
-  void SerializeNameValueBlockWithoutCompression(
+  void SerializeHeaderBlockWithoutCompression(
       SpdyFrameBuilder* builder,
-      const SpdyNameValueBlock& name_value_block) const;
+      const SpdyHeaderBlock& header_block) const;
 
   // Compresses automatically according to enable_compression_.
-  void SerializeNameValueBlock(
-      SpdyFrameBuilder* builder,
-      const SpdyFrameWithNameValueBlockIR& frame);
+  void SerializeHeaderBlock(SpdyFrameBuilder* builder,
+                            const SpdyFrameWithHeaderBlockIR& frame);
 
   // Set the error code and moves the framer into the error state.
   void set_error(SpdyError error);
@@ -704,9 +714,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // are part of the frame's payload, and not the frame's headers.
   size_t remaining_control_header_;
 
-  scoped_ptr<char[]> current_frame_buffer_;
-  // Number of bytes read into the current_frame_buffer_.
-  size_t current_frame_buffer_length_;
+  CharBuffer current_frame_buffer_;
 
   // The type of the frame currently being read.
   SpdyFrameType current_frame_type_;
@@ -728,7 +736,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // current_frame_buffer_.
   SpdySettingsScratch settings_scratch_;
 
-  SpdyAltSvcScratch altsvc_scratch_;
+  scoped_ptr<CharBuffer> altsvc_scratch_;
 
   // SPDY header compressors.
   scoped_ptr<z_stream> header_compressor_;
@@ -771,6 +779,10 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // we know to terminate the stream when the entire header block has been
   // processed.
   bool end_stream_when_done_;
+
+  // If true, then ProcessInput returns after processing a full frame,
+  // rather than reading all available input.
+  bool process_single_input_frame_ = false;
 
   // Last acknowledged value for SETTINGS_HEADER_TABLE_SIZE.
   size_t header_table_size_bound_;

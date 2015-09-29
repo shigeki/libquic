@@ -17,7 +17,7 @@ namespace net {
 class QuicSpdySession;
 
 // Headers in QUIC are sent as SPDY SYN_STREAM or SYN_REPLY frames
-// over a reserved reliable stream with the id 2.  Each endpoint (client
+// over a reserved reliable stream with the id 3.  Each endpoint (client
 // and server) will allocate an instance of QuicHeadersStream to send
 // and receive headers.
 class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
@@ -37,7 +37,7 @@ class NET_EXPORT_PRIVATE QuicHeadersStream : public ReliableQuicStream {
       QuicAckNotifier::DelegateInterface* ack_notifier_delegate);
 
   // ReliableQuicStream implementation
-  uint32 ProcessRawData(const char* data, uint32 data_len) override;
+  void OnDataAvailable() override;
   QuicPriority EffectivePriority() const override;
 
  private:

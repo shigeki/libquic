@@ -74,11 +74,6 @@ class BASE_EXPORT PickleIterator {
   }
 
  private:
-  // Aligns 'i' by rounding it up to the next multiple of 'alignment'.
-  static size_t AlignInt(size_t i, int alignment) {
-    return i + (alignment - (i % alignment)) % alignment;
-  }
-
   // Read Type from Pickle.
   template <typename Type>
   bool ReadBuiltinType(Type* result);
@@ -270,11 +265,6 @@ class BASE_EXPORT Pickle {
   // of the header.
   void Resize(size_t new_capacity);
 
-  // Aligns 'i' by rounding it up to the next multiple of 'alignment'
-  static size_t AlignInt(size_t i, int alignment) {
-    return i + (alignment - (i % alignment)) % alignment;
-  }
-
   // Find the end of the pickled data that starts at range_start.  Returns NULL
   // if the entire Pickle is not found in the given data range.
   static const char* FindNext(size_t header_size,
@@ -306,6 +296,7 @@ class BASE_EXPORT Pickle {
   }
   inline void WriteBytesCommon(const void* data, size_t length);
 
+  FRIEND_TEST_ALL_PREFIXES(PickleTest, DeepCopyResize);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, Resize);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNext);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNextWithIncompleteHeader);

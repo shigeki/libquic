@@ -40,7 +40,6 @@ class BrowserShutdownProfileDumper;
 class BrowserTestBase;
 class GpuChannelHost;
 class NestedMessagePumpAndroid;
-class RenderWidgetResizeHelper;
 class ScopedAllowWaitForAndroidLayoutTests;
 class ScopedAllowWaitForDebugURL;
 class TextInputClientMac;
@@ -66,6 +65,10 @@ class AddressTrackerLinux;
 
 namespace remoting {
 class AutoThread;
+}
+
+namespace ui {
+class WindowResizeHelperMac;
 }
 
 namespace base {
@@ -175,7 +178,6 @@ class BASE_EXPORT ThreadRestrictions {
   friend class content::BrowserShutdownProfileDumper;
   friend class content::BrowserTestBase;
   friend class content::NestedMessagePumpAndroid;
-  friend class content::RenderWidgetResizeHelper;
   friend class content::ScopedAllowWaitForAndroidLayoutTests;
   friend class content::ScopedAllowWaitForDebugURL;
   friend class ::HistogramSynchronizer;
@@ -184,6 +186,7 @@ class BASE_EXPORT ThreadRestrictions {
   friend class cc::TaskGraphRunner;
   friend class mojo::common::WatcherThreadManager;
   friend class remoting::AutoThread;
+  friend class ui::WindowResizeHelperMac;
   friend class MessagePumpDefault;
   friend class SequencedWorkerPool;
   friend class SimpleThread;
@@ -207,7 +210,7 @@ class BASE_EXPORT ThreadRestrictions {
   friend class disk_cache::BackendImpl;           // http://crbug.com/74623
   friend class disk_cache::InFlightIO;            // http://crbug.com/74623
   friend class net::internal::AddressTrackerLinux;  // http://crbug.com/125097
-  friend class net::NetworkChangeNotifierMac;     // http://crbug.com/502005
+  friend class net::NetworkChangeNotifierMac;     // http://crbug.com/125097
   friend class ::BrowserProcessImpl;              // http://crbug.com/125207
   friend class ::NativeBackendKWallet;            // http://crbug.com/125331
   // END USAGE THAT NEEDS TO BE FIXED.

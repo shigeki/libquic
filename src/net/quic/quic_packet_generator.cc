@@ -44,14 +44,14 @@ QuicPacketGenerator::QuicPacketGenerator(QuicConnectionId connection_id,
       packet_creator_(connection_id, framer, random_generator),
       batch_mode_(false),
       fec_timeout_(QuicTime::Delta::Zero()),
+      rtt_multiplier_for_fec_timeout_(kRttMultiplierForFecTimeout),
       should_fec_protect_(false),
       fec_send_policy_(FEC_ANY_TRIGGER),
       should_send_ack_(false),
       should_send_stop_waiting_(false),
       ack_queued_(false),
       stop_waiting_queued_(false),
-      max_packet_length_(kDefaultMaxPacketSize) {
-}
+      max_packet_length_(kDefaultMaxPacketSize) {}
 
 QuicPacketGenerator::~QuicPacketGenerator() {
   for (QuicFrame& frame : queued_control_frames_) {
@@ -64,6 +64,9 @@ QuicPacketGenerator::~QuicPacketGenerator() {
         break;
       case ACK_FRAME:
         delete frame.ack_frame;
+        break;
+      case MTU_DISCOVERY_FRAME:
+        delete frame.mtu_discovery_frame;
         break;
       case RST_STREAM_FRAME:
         delete frame.rst_stream_frame;
@@ -100,7 +103,7 @@ void QuicPacketGenerator::OnCongestionWindowChange(
 }
 
 void QuicPacketGenerator::OnRttChange(QuicTime::Delta rtt) {
-  fec_timeout_ = rtt.Multiply(kRttMultiplierForFecTimeout);
+  fec_timeout_ = rtt.Multiply(rtt_multiplier_for_fec_timeout_);
 }
 
 void QuicPacketGenerator::SetShouldSendAck(bool also_send_stop_waiting) {
@@ -230,6 +233,39 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(
   return QuicConsumedData(total_bytes_consumed, fin_consumed);
 }
 
+void QuicPacketGenerator::GenerateMtuDiscoveryPacket(
+    QuicByteCount target_mtu,
+    QuicAckNotifier::DelegateInterface* delegate) {
+  // MTU discovery frames must be sent by themselves.
+  DCHECK(!InBatchMode() && !packet_creator_.HasPendingFrames());
+
+  // If an ack notifier delegate is provided, register it.
+  if (delegate) {
+    QuicAckNotifier* ack_notifier = new QuicAckNotifier(delegate);
+    // The notifier manager will take the ownership of the notifier after the
+    // packet is sent.
+    ack_notifiers_.push_back(ack_notifier);
+  }
+
+  const QuicByteCount current_mtu = GetMaxPacketLength();
+
+  // The MTU discovery frame is allocated on the stack, since it is going to be
+  // serialized within this function.
+  QuicMtuDiscoveryFrame mtu_discovery_frame;
+  QuicFrame frame(&mtu_discovery_frame);
+
+  // Send the probe packet with the new length.
+  SetMaxPacketLength(target_mtu, /*force=*/true);
+  const bool success = AddFrame(frame, nullptr, /*needs_padding=*/true);
+  SerializeAndSendPacket();
+  // The only reason AddFrame can fail is that the packet is too full to fit in
+  // a ping.  This is not possible for any sane MTU.
+  DCHECK(success);
+
+  // Reset the packet length back.
+  SetMaxPacketLength(current_mtu, /*force=*/true);
+}
+
 bool QuicPacketGenerator::CanSendWithNextPendingFrameAddition() const {
   DCHECK(HasPendingFrames());
   HasRetransmittableData retransmittable =
@@ -333,11 +369,11 @@ void QuicPacketGenerator::OnFecTimeout() {
 }
 
 QuicTime::Delta QuicPacketGenerator::GetFecTimeout(
-    QuicPacketSequenceNumber sequence_number) {
-  // Do not set up FEC alarm for |sequence_number| it is not the first packet in
+    QuicPacketNumber packet_number) {
+  // Do not set up FEC alarm for |packet_number| it is not the first packet in
   // the current group.
   if (packet_creator_.IsFecGroupOpen() &&
-      (sequence_number == packet_creator_.fec_group_number())) {
+      (packet_number == packet_creator_.fec_group_number())) {
     return QuicTime::Delta::Max(
         fec_timeout_, QuicTime::Delta::FromMilliseconds(kMinFecTimeoutMs));
   }
@@ -418,10 +454,20 @@ bool QuicPacketGenerator::AddFrame(const QuicFrame& frame,
 }
 
 void QuicPacketGenerator::SerializeAndSendPacket() {
-  char buffer[kMaxPacketSize];
+  // The optimized encryption algorithm implementations run faster when
+  // operating on aligned memory.
+  //
+  // TODO(rtenneti): Change the default 64 alignas value (used the default
+  // value from CACHELINE_SIZE).
+  ALIGNAS(64) char buffer[kMaxPacketSize];
   SerializedPacket serialized_packet =
       packet_creator_.SerializePacket(buffer, kMaxPacketSize);
-  DCHECK(serialized_packet.packet);
+  if (serialized_packet.packet == nullptr) {
+    LOG(DFATAL) << "Failed to SerializePacket. fec_policy:" << fec_send_policy_
+                << " should_fec_protect_:" << should_fec_protect_;
+    delegate_->CloseConnection(QUIC_FAILED_TO_SERIALIZE_PACKET, false);
+    return;
+  }
 
   // There may be AckNotifiers interested in this packet.
   serialized_packet.notifiers.swap(ack_notifiers_);
@@ -445,8 +491,8 @@ void QuicPacketGenerator::StopSendingVersion() {
   packet_creator_.StopSendingVersion();
 }
 
-QuicPacketSequenceNumber QuicPacketGenerator::sequence_number() const {
-  return packet_creator_.sequence_number();
+QuicPacketNumber QuicPacketGenerator::packet_number() const {
+  return packet_creator_.packet_number();
 }
 
 QuicByteCount QuicPacketGenerator::GetMaxPacketLength() const {
@@ -480,7 +526,7 @@ QuicEncryptedPacket* QuicPacketGenerator::SerializeVersionNegotiationPacket(
 
 SerializedPacket QuicPacketGenerator::ReserializeAllFrames(
     const RetransmittableFrames& frames,
-    QuicSequenceNumberLength original_length,
+    QuicPacketNumberLength original_length,
     char* buffer,
     size_t buffer_len) {
   return packet_creator_.ReserializeAllFrames(frames, original_length, buffer,
@@ -488,10 +534,10 @@ SerializedPacket QuicPacketGenerator::ReserializeAllFrames(
 }
 
 void QuicPacketGenerator::UpdateSequenceNumberLength(
-      QuicPacketSequenceNumber least_packet_awaited_by_peer,
-      QuicPacketCount max_packets_in_flight) {
-  return packet_creator_.UpdateSequenceNumberLength(
-      least_packet_awaited_by_peer, max_packets_in_flight);
+    QuicPacketNumber least_packet_awaited_by_peer,
+    QuicPacketCount max_packets_in_flight) {
+  return packet_creator_.UpdatePacketNumberLength(least_packet_awaited_by_peer,
+                                                  max_packets_in_flight);
 }
 
 void QuicPacketGenerator::SetConnectionIdLength(uint32 length) {
