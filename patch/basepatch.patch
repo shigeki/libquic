@@ -98,7 +98,7 @@ index ad01828..dde18a9 100644
  namespace base {
  
 diff --git a/src/base/threading/platform_thread_linux.cc b/src/base/threading/platform_thread_linux.cc
-index 9f74374..046cc99 100644
+index 48cf744..46374af 100644
 --- a/src/base/threading/platform_thread_linux.cc
 +++ b/src/base/threading/platform_thread_linux.cc
 @@ -11,7 +11,9 @@
@@ -111,7 +111,7 @@ index 9f74374..046cc99 100644
  
  #if !defined(OS_NACL)
  #include <pthread.h>
-@@ -72,7 +74,9 @@ bool GetThreadPriorityForPlatform(PlatformThreadHandle handle,
+@@ -77,7 +79,9 @@ bool GetCurrentThreadPriorityForPlatform(ThreadPriority* priority) {
  // static
  void PlatformThread::SetName(const std::string& name) {
    ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
@@ -122,7 +122,7 @@ index 9f74374..046cc99 100644
  #if !defined(OS_NACL)
    // On linux we can get the thread names to show up in the debugger by setting
 diff --git a/src/base/threading/platform_thread_mac.mm b/src/base/threading/platform_thread_mac.mm
-index 813cae2..7991050 100644
+index 1ecbcd6..593caad 100644
 --- a/src/base/threading/platform_thread_mac.mm
 +++ b/src/base/threading/platform_thread_mac.mm
 @@ -16,7 +16,9 @@
@@ -145,22 +145,8 @@ index 813cae2..7991050 100644
  
    // Mac OS X does not expose the length limit of the name, so
    // hardcode it.
-diff --git a/src/base/threading/platform_thread_posix.cc b/src/base/threading/platform_thread_posix.cc
-index 0d821a9..4d16bbb 100644
---- a/src/base/threading/platform_thread_posix.cc
-+++ b/src/base/threading/platform_thread_posix.cc
-@@ -17,7 +17,9 @@
- #include "base/threading/platform_thread_internal_posix.h"
- #include "base/threading/thread_id_name_manager.h"
- #include "base/threading/thread_restrictions.h"
-+#if 0
- #include "base/tracked_objects.h"
-+#endif
- 
- #if defined(OS_LINUX)
- #include <sys/syscall.h>
 diff --git a/src/crypto/nss_util.cc b/src/crypto/nss_util.cc
-index 125591c..acebabe 100644
+index 4e8aab4..0893e73 100644
 --- a/src/crypto/nss_util.cc
 +++ b/src/crypto/nss_util.cc
 @@ -27,22 +27,30 @@
@@ -408,7 +394,7 @@ index 125591c..acebabe 100644
      // TODO(mattm): chromeos::TPMTokenloader always calls
      // InitializeTPMTokenAndSystemSlot with slot 0.  If the system slot is
      // disabled, tpm_slot_ will be the first user's slot instead. Can that be
-@@ -686,7 +734,9 @@ class NSSInitSingleton {
+@@ -688,7 +736,9 @@ class NSSInitSingleton {
          root_(NULL) {
      // It's safe to construct on any thread, since LazyInstance will prevent any
      // other threads from accessing until the constructor is done.
@@ -418,7 +404,7 @@ index 125591c..acebabe 100644
  
      DisableAESNIIfNeeded();
  
-@@ -852,6 +902,7 @@ class NSSInitSingleton {
+@@ -860,6 +910,7 @@ class NSSInitSingleton {
  #endif
  
    static void DisableAESNIIfNeeded() {
@@ -426,15 +412,15 @@ index 125591c..acebabe 100644
      if (NSS_VersionCheck("3.15") && !NSS_VersionCheck("3.15.4")) {
        // Some versions of NSS have a bug that causes AVX instructions to be
        // used without testing whether XSAVE is enabled by the operating system.
-@@ -865,6 +916,7 @@ class NSSInitSingleton {
+@@ -873,6 +924,7 @@ class NSSInitSingleton {
          env->SetVar("NSS_DISABLE_HW_AES", "1");
        }
      }
 +#endif
    }
  
-   // If this is set to true NSS is forced to be initialized without a DB.
-@@ -888,7 +940,9 @@ class NSSInitSingleton {
+ #if !defined(USE_OPENSSL)
+@@ -898,7 +950,9 @@ class NSSInitSingleton {
    base::Lock write_lock_;
  #endif  // defined(USE_NSS_CERTS)
  
@@ -443,8 +429,8 @@ index 125591c..acebabe 100644
 +#endif
  };
  
- // static
-@@ -942,7 +996,9 @@ void EnsureNSSInit() {
+ #if !defined(USE_OPENSSL)
+@@ -956,7 +1010,9 @@ void EnsureNSSInit() {
    // Initializing SSL causes us to do blocking IO.
    // Temporarily allow it until we fix
    //   http://code.google.com/p/chromium/issues/detail?id=59847
@@ -454,7 +440,7 @@ index 125591c..acebabe 100644
    g_nss_singleton.Get();
  }
  
-@@ -951,11 +1007,14 @@ void ForceNSSNoDBInit() {
+@@ -967,11 +1023,14 @@ void ForceNSSNoDBInit() {
  }
  
  void DisableNSSForkCheck() {
@@ -469,22 +455,22 @@ index 125591c..acebabe 100644
    // Some NSS libraries are linked dynamically so load them here.
  #if defined(USE_NSS_CERTS)
    // Try to search for multiple directories to load the libraries.
-@@ -1007,6 +1066,7 @@ void LoadNSSLibraries() {
+@@ -1023,6 +1082,7 @@ void LoadNSSLibraries() {
      LOG(ERROR) << "Failed to load NSS libraries.";
    }
  #endif  // defined(USE_NSS_CERTS)
 +#endif
  }
  
- bool CheckNSSVersion(const char* version) {
+ #endif  // !defined(USE_OPENSSL)
 diff --git a/src/net/base/host_port_pair.cc b/src/net/base/host_port_pair.cc
-index 816bbac..33fc2fa 100644
+index a0dd2d5..b9976e7 100644
 --- a/src/net/base/host_port_pair.cc
 +++ b/src/net/base/host_port_pair.cc
 @@ -11,7 +11,9 @@
  #include "base/strings/stringprintf.h"
  #include "net/base/ip_endpoint.h"
- #include "net/base/net_util.h"
+ #include "net/base/port_util.h"
 +#if 0
  #include "url/gurl.h"
 +#endif
@@ -575,20 +561,20 @@ index a3b6040..485d3c0 100644
  }  // namespace net
  
 diff --git a/src/net/quic/crypto/crypto_utils.cc b/src/net/quic/crypto/crypto_utils.cc
-index 0916474..e3e7155 100644
+index 6021dc6..095447d 100644
 --- a/src/net/quic/crypto/crypto_utils.cc
 +++ b/src/net/quic/crypto/crypto_utils.cc
-@@ -12,7 +12,9 @@
- #include "net/quic/crypto/quic_encrypter.h"
+@@ -13,7 +13,9 @@
  #include "net/quic/crypto/quic_random.h"
  #include "net/quic/quic_time.h"
+ #include "net/quic/quic_utils.h"
 +#if 0
  #include "url/url_canon.h"
 +#endif
  
  using base::StringPiece;
  using std::numeric_limits;
-@@ -47,6 +49,7 @@ void CryptoUtils::GenerateNonce(QuicWallTime now,
+@@ -48,6 +50,7 @@ void CryptoUtils::GenerateNonce(QuicWallTime now,
                                kNonceSize - bytes_written);
  }
  
@@ -596,7 +582,7 @@ index 0916474..e3e7155 100644
  // static
  bool CryptoUtils::IsValidSNI(StringPiece sni) {
    // TODO(rtenneti): Support RFC2396 hostname.
-@@ -78,6 +81,29 @@ string CryptoUtils::NormalizeHostname(const char* hostname) {
+@@ -79,6 +82,29 @@ string CryptoUtils::NormalizeHostname(const char* hostname) {
    }
    return host;
  }
@@ -627,20 +613,20 @@ index 0916474..e3e7155 100644
  // static
  bool CryptoUtils::DeriveKeys(StringPiece premaster_secret,
 diff --git a/src/net/quic/quic_connection.cc b/src/net/quic/quic_connection.cc
-index dde2b07..909ba58 100644
+index 261230b..94738cc 100644
 --- a/src/net/quic/quic_connection.cc
 +++ b/src/net/quic/quic_connection.cc
 @@ -17,7 +17,9 @@
- #include "base/debug/stack_trace.h"
  #include "base/format_macros.h"
  #include "base/logging.h"
+ #include "base/memory/ref_counted.h"
 +#if 0
  #include "base/profiler/scoped_tracker.h"
 +#endif
  #include "base/stl_util.h"
  #include "base/strings/stringprintf.h"
  #include "net/base/net_errors.h"
-@@ -1239,10 +1241,12 @@ void QuicConnection::ProcessUdpPacket(const IPEndPoint& self_address,
+@@ -1227,10 +1229,12 @@ void QuicConnection::ProcessUdpPacket(const IPEndPoint& self_address,
    if (!connected_) {
      return;
    }
@@ -654,7 +640,7 @@ index dde2b07..909ba58 100644
      debug_visitor_->OnPacketReceived(self_address, peer_address, packet);
    }
 diff --git a/src/net/quic/quic_crypto_client_stream.cc b/src/net/quic/quic_crypto_client_stream.cc
-index d8463c5..9c1089f 100644
+index d4ea4ba..122fac3 100644
 --- a/src/net/quic/quic_crypto_client_stream.cc
 +++ b/src/net/quic/quic_crypto_client_stream.cc
 @@ -5,7 +5,9 @@
@@ -667,7 +653,7 @@ index d8463c5..9c1089f 100644
  #include "net/quic/crypto/crypto_protocol.h"
  #include "net/quic/crypto/crypto_utils.h"
  #include "net/quic/crypto/null_encrypter.h"
-@@ -363,10 +365,12 @@ void QuicCryptoClientStream::DoSendCHLO(
+@@ -356,10 +358,12 @@ void QuicCryptoClientStream::DoSendCHLO(
  void QuicCryptoClientStream::DoReceiveREJ(
      const CryptoHandshakeMessage* in,
      QuicCryptoClientConfig::CachedState* cached) {
@@ -680,26 +666,13 @@ index d8463c5..9c1089f 100644
  
    // We sent a dummy CHLO because we didn't have enough information to
    // perform a handshake, or we sent a full hello that the server
-diff --git a/src/net/quic/quic_sent_packet_manager.cc b/src/net/quic/quic_sent_packet_manager.cc
-index c81c93d..3fd4e7a 100644
---- a/src/net/quic/quic_sent_packet_manager.cc
-+++ b/src/net/quic/quic_sent_packet_manager.cc
-@@ -661,7 +661,7 @@ bool QuicSentPacketManager::MaybeRetransmitTailLossProbe() {
-     MarkForRetransmission(sequence_number, TLP_RETRANSMISSION);
-     return true;
-   }
--  DLOG(FATAL)
-+  DLOG(ERROR)
-     << "No retransmittable packets, so RetransmitOldestPacket failed.";
-   return false;
- }
 diff --git a/src/net/quic/quic_session.cc b/src/net/quic/quic_session.cc
-index e5a77a9..7d6c420 100644
+index fe375bf..3ce2d4a 100644
 --- a/src/net/quic/quic_session.cc
 +++ b/src/net/quic/quic_session.cc
-@@ -8,7 +8,9 @@
- #include "net/quic/crypto/proof_verifier.h"
+@@ -9,7 +9,9 @@
  #include "net/quic/quic_connection.h"
+ #include "net/quic/quic_flags.h"
  #include "net/quic/quic_flow_controller.h"
 +#if 0
  #include "net/ssl/ssl_info.h"
@@ -708,26 +681,26 @@ index e5a77a9..7d6c420 100644
  using base::StringPiece;
  using base::hash_map;
 diff --git a/src/net/spdy/spdy_framer.cc b/src/net/spdy/spdy_framer.cc
-index 7aee1ec..2f95059 100644
+index ad9fb97..c422655 100644
 --- a/src/net/spdy/spdy_framer.cc
 +++ b/src/net/spdy/spdy_framer.cc
-@@ -10,7 +10,9 @@
- 
+@@ -14,7 +14,9 @@
  #include "base/lazy_instance.h"
  #include "base/memory/scoped_ptr.h"
+ #include "base/metrics/histogram_macros.h"
 +#if 0
  #include "base/third_party/valgrind/memcheck.h"
 +#endif
+ #include "net/spdy/hpack/hpack_constants.h"
  #include "net/spdy/spdy_frame_builder.h"
  #include "net/spdy/spdy_frame_reader.h"
- #include "net/spdy/spdy_bitmasks.h"
 diff --git a/src/net/spdy/spdy_framer.h b/src/net/spdy/spdy_framer.h
-index 86d956c..7534292 100644
+index e3cabbc..ffe5a14 100644
 --- a/src/net/spdy/spdy_framer.h
 +++ b/src/net/spdy/spdy_framer.h
-@@ -21,7 +21,9 @@
- #include "net/spdy/hpack_decoder.h"
- #include "net/spdy/hpack_encoder.h"
+@@ -17,7 +17,9 @@
+ #include "net/spdy/hpack/hpack_decoder.h"
+ #include "net/spdy/hpack/hpack_encoder.h"
  #include "net/spdy/spdy_alt_svc_wire_format.h"
 +#if 0
  #include "net/spdy/spdy_header_block.h"
