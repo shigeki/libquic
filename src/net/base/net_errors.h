@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#if 0
 #include "base/files/file.h"
+#endif
 #include "base/logging.h"
 #include "net/base/net_export.h"
 
@@ -48,8 +50,10 @@ NET_EXPORT bool IsClientCertificateError(int error);
 // Map system error code to Error.
 NET_EXPORT Error MapSystemError(logging::SystemErrorCode os_error);
 
+#if 0
 // A convenient function to translate file error to net error code.
 NET_EXPORT Error FileErrorToNetError(base::File::Error file_error);
+#endif
 
 }  // namespace net
 

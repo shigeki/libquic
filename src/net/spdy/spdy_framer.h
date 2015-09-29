@@ -17,7 +17,9 @@
 #include "net/spdy/hpack/hpack_decoder.h"
 #include "net/spdy/hpack/hpack_encoder.h"
 #include "net/spdy/spdy_alt_svc_wire_format.h"
+#if 0
 #include "net/spdy/spdy_header_block.h"
+#endif
 #include "net/spdy/spdy_protocol.h"
 
 // TODO(akalin): Remove support for CREDENTIAL frames.

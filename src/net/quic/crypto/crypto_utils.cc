@@ -13,7 +13,9 @@
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_time.h"
 #include "net/quic/quic_utils.h"
+#if 0
 #include "url/url_canon.h"
+#endif
 
 using base::StringPiece;
 using std::numeric_limits;
@@ -48,6 +50,7 @@ void CryptoUtils::GenerateNonce(QuicWallTime now,
                               kNonceSize - bytes_written);
 }
 
+#if 0
 // static
 bool CryptoUtils::IsValidSNI(StringPiece sni) {
   // TODO(rtenneti): Support RFC2396 hostname.
@@ -79,6 +82,29 @@ string CryptoUtils::NormalizeHostname(const char* hostname) {
   }
   return host;
 }
+#else
+// TODO(hodduc): We should implement this !
+// static
+bool CryptoUtils::IsValidSNI(StringPiece sni) {
+  return sni.find_last_of('.') != string::npos;
+}
+
+string CryptoUtils::NormalizeHostname(const char* hostname) {
+  string host(hostname);
+
+  // Walk backwards over the string, stopping at the first trailing dot.
+  size_t host_end = host.length();
+  while (host_end != 0 && host[host_end - 1] == '.') {
+    host_end--;
+  }
+
+  // Erase the trailing dots.
+  if (host_end != host.length()) {
+    host.erase(host_end, host.length() - host_end);
+  }
+  return host;
+}
+#endif
 
 // static
 bool CryptoUtils::DeriveKeys(StringPiece premaster_secret,

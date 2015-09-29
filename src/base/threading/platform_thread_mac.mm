@@ -16,7 +16,9 @@
 #include "base/logging.h"
 #include "base/mac/mach_logging.h"
 #include "base/threading/thread_id_name_manager.h"
+#if 0
 #include "base/tracked_objects.h"
+#endif
 
 namespace base {
 
@@ -44,7 +46,9 @@ void InitThreading() {
 // static
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
+#if 0
   tracked_objects::ThreadData::InitializeThreadContext(name);
+#endif
 
   // Mac OS X does not expose the length limit of the name, so
   // hardcode it.

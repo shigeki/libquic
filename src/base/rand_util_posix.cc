@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 
@@ -43,6 +42,18 @@ uint64 RandUint64() {
   uint64 number;
   RandBytes(&number, sizeof(number));
   return number;
+}
+
+bool ReadFromFD(int fd, char* buffer, size_t bytes) {
+  size_t total_read = 0;
+  while (total_read < bytes) {
+    ssize_t bytes_read =
+        read(fd, buffer + total_read, bytes - total_read);
+    if (bytes_read <= 0)
+      break;
+    total_read += bytes_read;
+  }
+  return total_read == bytes;
 }
 
 void RandBytes(void* output, size_t output_length) {

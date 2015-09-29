@@ -8,5 +8,8 @@ namespace debug {
   void BreakDebugger() {
     _exit(1);
   }
+  bool BeingDebugged() {
+    return false;
+  }
 }  // namespace debug
 }  // namespace base
