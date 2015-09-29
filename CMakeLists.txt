@@ -156,21 +156,20 @@ set(
 	src/net/base/ip_endpoint.cc
 	src/net/base/host_port_pair.cc
 
-	src/net/spdy/hpack_string_util.cc
-	src/net/spdy/hpack_output_stream.cc
-	src/net/spdy/hpack_input_stream.cc
 	src/net/spdy/spdy_frame_reader.cc
 	src/net/spdy/spdy_frame_builder.cc
-	src/net/spdy/hpack_decoder.cc
-	src/net/spdy/hpack_header_table.cc
-	src/net/spdy/hpack_entry.cc
-	src/net/spdy/hpack_static_table.cc
-	src/net/spdy/hpack_constants.cc
 	src/net/spdy/spdy_framer.cc
-	src/net/spdy/hpack_encoder.cc
 	src/net/spdy/spdy_protocol.cc
-	src/net/spdy/hpack_huffman_table.cc
 	src/net/spdy/spdy_alt_svc_wire_format.cc
+	src/net/spdy/hpack/hpack_constants.cc
+	src/net/spdy/hpack/hpack_decoder.cc
+	src/net/spdy/hpack/hpack_encoder.cc
+	src/net/spdy/hpack/hpack_entry.cc
+	src/net/spdy/hpack/hpack_header_table.cc
+	src/net/spdy/hpack/hpack_huffman_table.cc
+	src/net/spdy/hpack/hpack_input_stream.cc
+	src/net/spdy/hpack/hpack_output_stream.cc
+	src/net/spdy/hpack/hpack_static_table.cc
 )
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -242,7 +241,6 @@ set(
 	src/base/debug/stack_trace.cc
 	src/base/debug/debugger.cc
 	src/base/callback_helpers.cc
-	src/base/atomicops_internals_x86_gcc.cc
 	src/base/json/json_string_value_serializer.cc
 	src/base/json/json_parser.cc
 	src/base/json/string_escape.cc
@@ -274,7 +272,6 @@ set(
 	src/base/third_party/dmg_fp/dtoa.cc
 	src/base/third_party/dmg_fp/g_fmt.cc
 	src/base/third_party/icu/icu_utf.cc
-	src/base/hash.cc
 	src/base/command_line.cc
 
 	src/base/third_party/superfasthash/superfasthash.c
