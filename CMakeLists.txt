@@ -159,6 +159,7 @@ set(
 	src/net/spdy/spdy_frame_reader.cc
 	src/net/spdy/spdy_frame_builder.cc
 	src/net/spdy/spdy_framer.cc
+	src/net/spdy/spdy_header_block.cc
 	src/net/spdy/spdy_protocol.cc
 	src/net/spdy/spdy_alt_svc_wire_format.cc
 	src/net/spdy/hpack/hpack_constants.cc
