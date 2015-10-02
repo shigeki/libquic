@@ -148,6 +148,7 @@ set(
 	src/net/quic/quic_server_id.cc
 	src/net/quic/proto/cached_network_parameters.pb.cc
 	src/net/quic/proto/source_address_token.pb.cc
+	src/net/quic/spdy_utils.cc
 
 	src/net/base/int128.cc
 	src/net/base/io_buffer.cc

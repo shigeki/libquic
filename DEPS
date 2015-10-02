@@ -186,6 +186,8 @@
                 "net/base/host_port_pair.h",
                 "net/base/host_port_pair.cc",
 		"net/base/port_util.h",
+		"net/quic/spdy_utils.cc",
+		"net/quic/spdy_utils.h",
                 "net/quic/crypto/chacha20_poly1305_decrypter.h",
                 "net/quic/crypto/chacha20_poly1305_decrypter_openssl.cc",
                 "net/quic/crypto/chacha20_poly1305_decrypter_nss.cc",
