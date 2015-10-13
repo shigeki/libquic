@@ -172,6 +172,27 @@ set(
 	src/net/spdy/hpack/hpack_input_stream.cc
 	src/net/spdy/hpack/hpack_output_stream.cc
 	src/net/spdy/hpack/hpack_static_table.cc
+	src/url/gurl.cc
+
+	src/url/url_canon_internal.cc
+	src/url/url_canon_query.cc
+	src/url/url_canon_etc.cc
+	src/url/url_canon_relative.cc
+	src/url/url_canon_filesystemurl.cc
+	src/url/url_canon_ip.cc
+	src/url/url_canon_stdstring.cc
+	src/url/url_canon_fileurl.cc
+	src/url/url_canon_host.cc
+	src/url/url_canon_mailtourl.cc
+	src/url/url_canon_stdurl.cc
+	src/url/url_canon_path.cc
+	src/url/url_canon_pathurl.cc
+	src/url/url_constants.cc
+	src/url/url_canon_internal.cc
+	src/url/url_canon_stdstring.cc
+	src/url/url_parse_file.cc
+	src/url/url_util.cc
+	src/url/third_party/mozilla/url_parse.cc
 )
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
