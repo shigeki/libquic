@@ -146,7 +146,7 @@ index 1ecbcd6..593caad 100644
    // Mac OS X does not expose the length limit of the name, so
    // hardcode it.
 diff --git a/src/crypto/nss_util.cc b/src/crypto/nss_util.cc
-index 4e8aab4..0893e73 100644
+index 8e378f4..8aca01f 100644
 --- a/src/crypto/nss_util.cc
 +++ b/src/crypto/nss_util.cc
 @@ -27,22 +27,30 @@
@@ -394,7 +394,7 @@ index 4e8aab4..0893e73 100644
      // TODO(mattm): chromeos::TPMTokenloader always calls
      // InitializeTPMTokenAndSystemSlot with slot 0.  If the system slot is
      // disabled, tpm_slot_ will be the first user's slot instead. Can that be
-@@ -688,7 +736,9 @@ class NSSInitSingleton {
+@@ -680,7 +728,9 @@ class NSSInitSingleton {
          root_(NULL) {
      // It's safe to construct on any thread, since LazyInstance will prevent any
      // other threads from accessing until the constructor is done.
@@ -402,25 +402,17 @@ index 4e8aab4..0893e73 100644
      thread_checker_.DetachFromThread();
 +#endif
  
-     DisableAESNIIfNeeded();
+     EnsureNSPRInit();
  
-@@ -860,6 +910,7 @@ class NSSInitSingleton {
- #endif
- 
-   static void DisableAESNIIfNeeded() {
-+#if 0
-     if (NSS_VersionCheck("3.15") && !NSS_VersionCheck("3.15.4")) {
-       // Some versions of NSS have a bug that causes AVX instructions to be
-       // used without testing whether XSAVE is enabled by the operating system.
-@@ -873,6 +924,7 @@ class NSSInitSingleton {
-         env->SetVar("NSS_DISABLE_HW_AES", "1");
-       }
+@@ -799,6 +849,7 @@ class NSSInitSingleton {
+       // we're shutting down anyway).
+       VLOG(1) << "NSS_Shutdown failed; see http://crbug.com/4609";
      }
 +#endif
    }
  
- #if !defined(USE_OPENSSL)
-@@ -898,7 +950,9 @@ class NSSInitSingleton {
+ #if defined(USE_NSS_CERTS) || defined(OS_IOS)
+@@ -861,7 +912,9 @@ class NSSInitSingleton {
    base::Lock write_lock_;
  #endif  // defined(USE_NSS_CERTS)
  
@@ -429,8 +421,8 @@ index 4e8aab4..0893e73 100644
 +#endif
  };
  
- #if !defined(USE_OPENSSL)
-@@ -956,7 +1010,9 @@ void EnsureNSSInit() {
+ base::LazyInstance<NSSInitSingleton>::Leaky
+@@ -901,7 +954,9 @@ void EnsureNSSInit() {
    // Initializing SSL causes us to do blocking IO.
    // Temporarily allow it until we fix
    //   http://code.google.com/p/chromium/issues/detail?id=59847
@@ -440,82 +432,6 @@ index 4e8aab4..0893e73 100644
    g_nss_singleton.Get();
  }
  
-@@ -967,11 +1023,14 @@ void ForceNSSNoDBInit() {
- }
- 
- void DisableNSSForkCheck() {
-+#if 0
-   scoped_ptr<base::Environment> env(base::Environment::Create());
-   env->SetVar("NSS_STRICT_NOFORK", "DISABLED");
-+#endif
- }
- 
- void LoadNSSLibraries() {
-+#if 0
-   // Some NSS libraries are linked dynamically so load them here.
- #if defined(USE_NSS_CERTS)
-   // Try to search for multiple directories to load the libraries.
-@@ -1023,6 +1082,7 @@ void LoadNSSLibraries() {
-     LOG(ERROR) << "Failed to load NSS libraries.";
-   }
- #endif  // defined(USE_NSS_CERTS)
-+#endif
- }
- 
- #endif  // !defined(USE_OPENSSL)
-diff --git a/src/net/base/host_port_pair.cc b/src/net/base/host_port_pair.cc
-index a0dd2d5..b9976e7 100644
---- a/src/net/base/host_port_pair.cc
-+++ b/src/net/base/host_port_pair.cc
-@@ -11,7 +11,9 @@
- #include "base/strings/stringprintf.h"
- #include "net/base/ip_endpoint.h"
- #include "net/base/port_util.h"
-+#if 0
- #include "url/gurl.h"
-+#endif
- 
- namespace net {
- 
-@@ -20,11 +22,13 @@ HostPortPair::HostPortPair(const std::string& in_host, uint16_t in_port)
-     : host_(in_host), port_(in_port) {
- }
- 
-+#if 0
- // static
- HostPortPair HostPortPair::FromURL(const GURL& url) {
-   return HostPortPair(url.HostNoBrackets(),
-                       static_cast<uint16_t>(url.EffectiveIntPort()));
- }
-+#endif
- 
- // static
- HostPortPair HostPortPair::FromIPEndPoint(const IPEndPoint& ipe) {
-diff --git a/src/net/base/host_port_pair.h b/src/net/base/host_port_pair.h
-index 9b1df56..6067640 100644
---- a/src/net/base/host_port_pair.h
-+++ b/src/net/base/host_port_pair.h
-@@ -9,7 +9,9 @@
- #include "base/basictypes.h"
- #include "net/base/net_export.h"
- 
-+#if 0
- class GURL;
-+#endif
- 
- namespace net {
- 
-@@ -21,8 +23,10 @@ class NET_EXPORT HostPortPair {
-   // If |in_host| represents an IPv6 address, it should not bracket the address.
-   HostPortPair(const std::string& in_host, uint16_t in_port);
- 
-+#if 0
-   // Creates a HostPortPair for the origin of |url|.
-   static HostPortPair FromURL(const GURL& url);
-+#endif
- 
-   // Creates a HostPortPair from an IPEndPoint.
-   static HostPortPair FromIPEndPoint(const IPEndPoint& ipe);
 diff --git a/src/net/base/net_errors.cc b/src/net/base/net_errors.cc
 index ddba87b..6f07590 100644
 --- a/src/net/base/net_errors.cc
@@ -613,7 +529,7 @@ index 6021dc6..095447d 100644
  // static
  bool CryptoUtils::DeriveKeys(StringPiece premaster_secret,
 diff --git a/src/net/quic/quic_connection.cc b/src/net/quic/quic_connection.cc
-index 261230b..94738cc 100644
+index 646a321..2d6ce53 100644
 --- a/src/net/quic/quic_connection.cc
 +++ b/src/net/quic/quic_connection.cc
 @@ -17,7 +17,9 @@
@@ -626,7 +542,7 @@ index 261230b..94738cc 100644
  #include "base/stl_util.h"
  #include "base/strings/stringprintf.h"
  #include "net/base/net_errors.h"
-@@ -1227,10 +1229,12 @@ void QuicConnection::ProcessUdpPacket(const IPEndPoint& self_address,
+@@ -1238,10 +1240,12 @@ void QuicConnection::ProcessUdpPacket(const IPEndPoint& self_address,
    if (!connected_) {
      return;
    }
@@ -681,7 +597,7 @@ index fe375bf..3ce2d4a 100644
  using base::StringPiece;
  using base::hash_map;
 diff --git a/src/net/spdy/spdy_framer.cc b/src/net/spdy/spdy_framer.cc
-index ad9fb97..c422655 100644
+index c59c786..dc1433b 100644
 --- a/src/net/spdy/spdy_framer.cc
 +++ b/src/net/spdy/spdy_framer.cc
 @@ -14,7 +14,9 @@
@@ -695,7 +611,7 @@ index ad9fb97..c422655 100644
  #include "net/spdy/spdy_frame_builder.h"
  #include "net/spdy/spdy_frame_reader.h"
 diff --git a/src/net/spdy/spdy_framer.h b/src/net/spdy/spdy_framer.h
-index e3cabbc..ffe5a14 100644
+index 23a3889..0754805 100644
 --- a/src/net/spdy/spdy_framer.h
 +++ b/src/net/spdy/spdy_framer.h
 @@ -17,7 +17,9 @@
@@ -728,3 +644,61 @@ index d12ab70..62be40c 100644
    dict->Set("headers", headers_dict);
    return dict.Pass();
  }
+diff --git a/src/url/url_canon_host.cc b/src/url/url_canon_host.cc
+index fce4d3a..dc2a8fb 100644
+--- a/src/url/url_canon_host.cc
++++ b/src/url/url_canon_host.cc
+@@ -163,6 +163,7 @@ bool DoSimpleHost(const INCHAR* host,
+   return success;
+ }
+ 
++#if 0
+ // Canonicalizes a host that requires IDN conversion. Returns true on success
+ bool DoIDNHost(const base::char16* src, int src_len, CanonOutput* output) {
+   // We need to escape URL before doing IDN conversion, since punicode strings
+@@ -190,7 +191,9 @@ bool DoIDNHost(const base::char16* src, int src_len, CanonOutput* output) {
+   DCHECK(!has_non_ascii);
+   return success;
+ }
++#endif
+ 
++#if 0
+ // 8-bit convert host to its ASCII version: this converts the UTF-8 input to
+ // UTF-16. The has_escaped flag should be set if the input string requires
+ // unescaping.
+@@ -253,10 +256,12 @@ bool DoComplexHost(const char* host, int host_len,
+   // and also check for IP addresses in the outpt.
+   return DoIDNHost(utf16.data(), utf16.length(), output);
+ }
++#endif
+ 
+ // UTF-16 convert host to its ASCII version. The set up is already ready for
+ // the backend, so we just pass through. The has_escaped flag should be set if
+ // the input string requires unescaping.
++#if 0
+ bool DoComplexHost(const base::char16* host, int host_len,
+                    bool has_non_ascii, bool has_escaped, CanonOutput* output) {
+   if (has_escaped) {
+@@ -286,6 +291,7 @@ bool DoComplexHost(const base::char16* host, int host_len,
+   // this function will do the right thing (just slower than we could).
+   return DoIDNHost(host, host_len, output);
+ }
++#endif
+ 
+ template<typename CHAR, typename UCHAR>
+ void DoHost(const CHAR* spec,
+@@ -311,8 +317,12 @@ void DoHost(const CHAR* spec,
+                            output, &has_non_ascii);
+     DCHECK(!has_non_ascii);
+   } else {
+-    success = DoComplexHost(&spec[host.begin], host.len,
+-                            has_non_ascii, has_escaped, output);
++#if 0
++        success = DoComplexHost(&spec[host.begin], host.len,
++                          has_non_ascii, has_escaped, output);
++#endif
++    // complex host is not supported
++    success = false;
+   }
+ 
+   if (!success) {
