@@ -239,7 +239,7 @@
                 "crypto/third_party/nss/*.cc",
                 "crypto/third_party/nss/*.h",
 		"url/*.h",
-		"url/url/gurl.cc",
+		"url/gurl.cc",
 		"url/url_canon_etc.cc",
 		"url/url_canon_stdurl.cc",
 		"url/url_canon_etc.cc",
