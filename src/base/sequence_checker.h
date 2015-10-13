@@ -6,7 +6,6 @@
 #define BASE_SEQUENCE_CHECKER_H_
 
 // See comments for the similar block in thread_checker.h.
-#if 0
 #if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
 #define ENABLE_SEQUENCE_CHECKER 1
 #else
@@ -14,9 +13,6 @@
 #endif
 
 #include "base/sequence_checker_impl.h"
-#else
-#define ENABLE_SEQUENCE_CHECKER 0
-#endif
 
 namespace base {
 

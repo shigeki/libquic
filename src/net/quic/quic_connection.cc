@@ -17,9 +17,7 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#if 0
 #include "base/profiler/scoped_tracker.h"
-#endif
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/net_errors.h"
@@ -208,9 +206,14 @@ class MtuDiscoveryAckListener : public QuicAckNotifier::DelegateInterface {
                          int /*num_retransmittable_bytes*/,
                          QuicTime::Delta /*delta_largest_observed*/) override {
     // Since the probe was successful, increase the maximum packet size to that.
-    if (probe_size_ > connection_->max_packet_length()) {
-      connection_->SetMaxPacketLength(probe_size_);
-    }
+    MaybeIncreaseMtu();
+  }
+
+  void OnPacketEvent(int /*acked_bytes*/,
+                     int /*retransmitted_bytes*/,
+                     QuicTime::Delta /*delta_largest_observed*/) override {
+    // MTU discovery packets are not retransmittable, so it must be acked.
+    MaybeIncreaseMtu();
   }
 
  protected:
@@ -218,6 +221,12 @@ class MtuDiscoveryAckListener : public QuicAckNotifier::DelegateInterface {
   ~MtuDiscoveryAckListener() override {}
 
  private:
+  void MaybeIncreaseMtu() {
+    if (probe_size_ > connection_->max_packet_length()) {
+      connection_->SetMaxPacketLength(probe_size_);
+    }
+  }
+
   QuicConnection* connection_;
   QuicByteCount probe_size_;
 
@@ -1229,12 +1238,10 @@ void QuicConnection::ProcessUdpPacket(const IPEndPoint& self_address,
   if (!connected_) {
     return;
   }
-#if 0
   // TODO(rtenneti): Remove ScopedTracker below once crbug.com/462789 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "462789 QuicConnection::ProcessUdpPacket"));
-#endif
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnPacketReceived(self_address, peer_address, packet);
   }

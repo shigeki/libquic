@@ -253,6 +253,14 @@ EVENT_TYPE(PROXY_SERVICE_WAITING_FOR_INIT_PAC)
 //   }
 EVENT_TYPE(PROXY_SERVICE_RESOLVED_PROXY_LIST)
 
+// This event is emitted after proxies marked as bad have been deprioritized.
+//
+// It contains these parameters:
+//   {
+//      "pac_string": <List of valid proxy servers, in PAC format>,
+//   }
+EVENT_TYPE(PROXY_SERVICE_DEPRIORITIZED_BAD_PROXIES)
+
 // This event is emitted whenever the proxy settings used by ProxyService
 // change.
 //
@@ -2640,3 +2648,32 @@ EVENT_TYPE(DATA_REDUCTION_PROXY_FALLBACK)
 //                            request will be made>,
 //  }
 EVENT_TYPE(DATA_REDUCTION_PROXY_CONFIG_REQUEST)
+
+// -----------------------------------------------------------------------------
+// Safe Browsing related events
+// -----------------------------------------------------------------------------
+
+// The start/end of an async URL check by Safe Browsing. Will only show up if
+// it can't be classified as "safe" synchronously.
+//
+// The BEGIN phase contains the following parameters:
+//  {
+//    "url": <The URL being checked>,
+//  }
+//
+// The END phase contains the following parameters:
+//  {
+//    "result": <"safe", "unsafe", or "request_canceled">
+//  }
+EVENT_TYPE(SAFE_BROWSING_CHECKING_URL)
+
+// The start/end of some portion of the SAFE_BROWSING_CHECKING_URL during which
+// the request is delayed due to that check.
+//
+// The BEGIN phase contains the following parameters:
+//  {
+//    "url": <The URL being checked>,
+//    "defer_reason" : < "at_start", "at_response", "redirect",
+//                       "resumed_redirect", "unchecked_redirect">
+//  }
+EVENT_TYPE(SAFE_BROWSING_DEFERRED)

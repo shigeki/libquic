@@ -9,9 +9,7 @@
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_flow_controller.h"
-#if 0
 #include "net/ssl/ssl_info.h"
-#endif
 
 using base::StringPiece;
 using base::hash_map;

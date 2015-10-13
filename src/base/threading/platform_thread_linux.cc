@@ -11,9 +11,7 @@
 #include "base/logging.h"
 #include "base/threading/platform_thread_internal_posix.h"
 #include "base/threading/thread_id_name_manager.h"
-#if 0
 #include "base/tracked_objects.h"
-#endif
 
 #if !defined(OS_NACL)
 #include <pthread.h>
@@ -79,9 +77,7 @@ bool GetCurrentThreadPriorityForPlatform(ThreadPriority* priority) {
 // static
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(CurrentId(), name);
-#if 0
   tracked_objects::ThreadData::InitializeThreadContext(name);
-#endif
 
 #if !defined(OS_NACL)
   // On linux we can get the thread names to show up in the debugger by setting

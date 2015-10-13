@@ -2,7 +2,7 @@
 // source: cached_network_parameters.proto
 
 #define INTERNAL_SUPPRESS_PROTOBUF_FIELD_DEPRECATION
-#include "net/quic/proto/cached_network_parameters.pb.h"
+#include "cached_network_parameters.pb.h"
 
 #include <algorithm>
 
