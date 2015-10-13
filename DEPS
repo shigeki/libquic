@@ -139,19 +139,6 @@
                 "base/base_paths_win.h",
                 "base/message_loop/message_loop.h"
             ]
-        },
-        {
-            "from": "url/gurl.cc",
-            "exclude": [
-	         "valgrind.h",
-		 "base/trace_event/etw_manifest/chrome_events_win.h",
-		 "jni/SystemMessageHandler_jni.h",
-		 "event-config.h",
-		 "evutil.h",
-		 "jni/Runtime_jni.h",
-		 "jni/BuildInfo_jni.h",
-		 "jni/JNIUtils_jni.h"
-            ]
         }
     ],
     "manual_dependency": [
@@ -251,6 +238,8 @@
                 "crypto/third_party/nss/*.c",
                 "crypto/third_party/nss/*.cc",
                 "crypto/third_party/nss/*.h",
+		"url/*.h",
+		"url/url/gurl.cc",
 		"url/url_canon_etc.cc",
 		"url/url_canon_stdurl.cc",
 		"url/url_canon_etc.cc",
