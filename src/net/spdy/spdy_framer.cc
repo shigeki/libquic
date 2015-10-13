@@ -14,7 +14,9 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#if 0
 #include "base/third_party/valgrind/memcheck.h"
+#endif
 #include "net/spdy/hpack/hpack_constants.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_frame_reader.h"

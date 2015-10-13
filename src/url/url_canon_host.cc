@@ -163,6 +163,7 @@ bool DoSimpleHost(const INCHAR* host,
   return success;
 }
 
+#if 0
 // Canonicalizes a host that requires IDN conversion. Returns true on success
 bool DoIDNHost(const base::char16* src, int src_len, CanonOutput* output) {
   // We need to escape URL before doing IDN conversion, since punicode strings
@@ -190,7 +191,9 @@ bool DoIDNHost(const base::char16* src, int src_len, CanonOutput* output) {
   DCHECK(!has_non_ascii);
   return success;
 }
+#endif
 
+#if 0
 // 8-bit convert host to its ASCII version: this converts the UTF-8 input to
 // UTF-16. The has_escaped flag should be set if the input string requires
 // unescaping.
@@ -253,10 +256,12 @@ bool DoComplexHost(const char* host, int host_len,
   // and also check for IP addresses in the outpt.
   return DoIDNHost(utf16.data(), utf16.length(), output);
 }
+#endif
 
 // UTF-16 convert host to its ASCII version. The set up is already ready for
 // the backend, so we just pass through. The has_escaped flag should be set if
 // the input string requires unescaping.
+#if 0
 bool DoComplexHost(const base::char16* host, int host_len,
                    bool has_non_ascii, bool has_escaped, CanonOutput* output) {
   if (has_escaped) {
@@ -286,6 +291,7 @@ bool DoComplexHost(const base::char16* host, int host_len,
   // this function will do the right thing (just slower than we could).
   return DoIDNHost(host, host_len, output);
 }
+#endif
 
 template<typename CHAR, typename UCHAR>
 void DoHost(const CHAR* spec,
@@ -311,8 +317,12 @@ void DoHost(const CHAR* spec,
                            output, &has_non_ascii);
     DCHECK(!has_non_ascii);
   } else {
-    success = DoComplexHost(&spec[host.begin], host.len,
-                            has_non_ascii, has_escaped, output);
+#if 0
+        success = DoComplexHost(&spec[host.begin], host.len,
+                          has_non_ascii, has_escaped, output);
+#endif
+    // complex host is not supported
+    success = false;
   }
 
   if (!success) {

@@ -5,7 +5,9 @@
 #include "net/quic/quic_crypto_client_stream.h"
 
 #include "base/metrics/histogram_macros.h"
+#if 0
 #include "base/profiler/scoped_tracker.h"
+#endif
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/crypto/crypto_utils.h"
 #include "net/quic/crypto/null_encrypter.h"
@@ -356,10 +358,12 @@ void QuicCryptoClientStream::DoSendCHLO(
 void QuicCryptoClientStream::DoReceiveREJ(
     const CryptoHandshakeMessage* in,
     QuicCryptoClientConfig::CachedState* cached) {
+#if 0
   // TODO(rtenneti): Remove ScopedTracker below once crbug.com/422516 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "422516 QuicCryptoClientStream::DoReceiveREJ"));
+#endif
 
   // We sent a dummy CHLO because we didn't have enough information to
   // perform a handshake, or we sent a full hello that the server
