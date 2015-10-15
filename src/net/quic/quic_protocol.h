@@ -19,6 +19,7 @@
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/int128.h"
 #include "net/base/iovec.h"
@@ -161,6 +162,11 @@ const int kMinPacketsBetweenServerConfigUpdates = 100;
 // percentage increase, whichever is larger.
 const float kMaxStreamsMultiplier = 1.1f;
 const int kMaxStreamsMinimumIncrement = 10;
+
+// Available streams are ones with IDs less than the highest stream that has
+// been opened which have neither been opened or reset. The limit on the number
+// of available streams is 10 times the limit on the number of open streams.
+const int kMaxAvailableStreamsMultiplier = 10;
 
 // We define an unsigned 16-bit floating point value, inspired by IEEE floats
 // (http://en.wikipedia.org/wiki/Half_precision_floating-point_format),
@@ -339,6 +345,7 @@ enum QuicVersion {
   QUIC_VERSION_25 = 25,  // SPDY/4 header keys, and removal of error_details
                          // from QuicRstStreamFrame
   QUIC_VERSION_26 = 26,  // In CHLO, send XLCT tag containing hash of leaf cert
+  QUIC_VERSION_27 = 27,  // Sends a nonce in the SHLO.
 };
 
 // This vector contains QUIC versions which we currently support.
@@ -349,7 +356,7 @@ enum QuicVersion {
 // IMPORTANT: if you are adding to this list, follow the instructions at
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {
-    QUIC_VERSION_26, QUIC_VERSION_25, QUIC_VERSION_24};
+    QUIC_VERSION_27, QUIC_VERSION_26, QUIC_VERSION_25, QUIC_VERSION_24};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
@@ -444,6 +451,7 @@ NET_EXPORT_PRIVATE QuicRstStreamErrorCode AdjustErrorForVersion(
 // These values must remain stable as they are uploaded to UMA histograms.
 // To add a new error code, use the current value of QUIC_LAST_ERROR and
 // increment QUIC_LAST_ERROR.
+// last value = 77
 enum QuicErrorCode {
   QUIC_NO_ERROR = 0,
 
@@ -502,6 +510,8 @@ enum QuicErrorCode {
   QUIC_TOO_MANY_OPEN_STREAMS = 18,
   // The peer must send a FIN/RST for each stream, and has not been doing so.
   QUIC_TOO_MANY_UNFINISHED_STREAMS = 66,
+  // The peer created too many available streams.
+  QUIC_TOO_MANY_AVAILABLE_STREAMS = 76,
   // Received public reset for this connection.
   QUIC_PUBLIC_RESET = 19,
   // Invalid protocol version.
@@ -610,7 +620,7 @@ enum QuicErrorCode {
   QUIC_VERSION_NEGOTIATION_MISMATCH = 55,
 
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 76,
+  QUIC_LAST_ERROR = 77,
 };
 
 struct NET_EXPORT_PRIVATE QuicPacketPublicHeader {
@@ -686,6 +696,11 @@ struct NET_EXPORT_PRIVATE QuicPingFrame {
 // A path MTU discovery frame contains no payload and is serialized as a ping
 // frame.
 struct NET_EXPORT_PRIVATE QuicMtuDiscoveryFrame {};
+
+typedef scoped_ptr<char[]> UniqueStreamBuffer;
+
+// Allocates memory of size |size| for a QUIC stream buffer.
+UniqueStreamBuffer NewStreamBuffer(size_t size);
 
 struct NET_EXPORT_PRIVATE QuicStreamFrame {
   QuicStreamFrame();
@@ -1099,7 +1114,7 @@ class NET_EXPORT_PRIVATE RetransmittableFrames {
   // Takes ownership of the frame inside |frame|.
   const QuicFrame& AddFrame(const QuicFrame& frame);
   // Takes ownership of the frame inside |frame| and |buffer|.
-  const QuicFrame& AddFrame(const QuicFrame& frame, char* buffer);
+  const QuicFrame& AddFrame(const QuicFrame& frame, UniqueStreamBuffer buffer);
   // Removes all stream frames associated with |stream_id|.
   void RemoveFramesForStream(QuicStreamId stream_id);
 
@@ -1123,6 +1138,10 @@ class NET_EXPORT_PRIVATE RetransmittableFrames {
   IsHandshake has_crypto_handshake_;
   bool needs_padding_;
   // Data referenced by the StringPiece of a QuicStreamFrame.
+  //
+  // TODO(rtenneti): Change const char* to UniqueStreamBuffer once chrome has
+  // c++11 library support.
+  // std::vector<UniqueStreamBuffer> stream_data_;
   std::vector<const char*> stream_data_;
 
   DISALLOW_COPY_AND_ASSIGN(RetransmittableFrames);
