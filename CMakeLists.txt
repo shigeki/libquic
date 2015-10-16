@@ -80,6 +80,7 @@ set(
 	src/net/quic/iovector.cc
 	src/net/quic/quic_stream_sequencer.cc
 	src/net/quic/quic_framer.cc
+	src/net/quic/quic_frame_list.cc
 	src/net/quic/quic_sent_packet_manager.cc
 	src/net/quic/quic_time.cc
 	src/net/quic/quic_headers_stream.cc

@@ -188,6 +188,8 @@
 		"net/base/port_util.h",
 		"net/quic/spdy_utils.cc",
 		"net/quic/spdy_utils.h",
+		"net/quic/quic_frame_list.cc",
+		"net/quic/quic_frame_list.h",
                 "net/quic/crypto/chacha20_poly1305_decrypter.h",
                 "net/quic/crypto/chacha20_poly1305_decrypter_openssl.cc",
                 "net/quic/crypto/chacha20_poly1305_decrypter_nss.cc",
