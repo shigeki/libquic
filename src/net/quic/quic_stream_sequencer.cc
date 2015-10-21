@@ -9,6 +9,8 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "net/quic/quic_clock.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_frame_list.h"
 #include "net/quic/reliable_quic_stream.h"
 
@@ -18,7 +20,8 @@ using std::string;
 
 namespace net {
 
-QuicStreamSequencer::QuicStreamSequencer(ReliableQuicStream* quic_stream)
+QuicStreamSequencer::QuicStreamSequencer(ReliableQuicStream* quic_stream,
+                                         const QuicClock* clock)
     : stream_(quic_stream),
       num_bytes_consumed_(0),
       close_offset_(numeric_limits<QuicStreamOffset>::max()),
@@ -26,7 +29,9 @@ QuicStreamSequencer::QuicStreamSequencer(ReliableQuicStream* quic_stream)
       num_bytes_buffered_(0),
       num_frames_received_(0),
       num_duplicate_frames_received_(0),
-      num_early_frames_received_(0) {}
+      num_early_frames_received_(0),
+      clock_(clock),
+      ignore_read_data_(false) {}
 
 QuicStreamSequencer::~QuicStreamSequencer() {}
 
@@ -48,8 +53,8 @@ void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame) {
     }
   }
   size_t bytes_written;
-  QuicErrorCode result =
-      buffered_frames_.WriteAtOffset(byte_offset, frame.data, &bytes_written);
+  QuicErrorCode result = buffered_frames_.WriteAtOffset(
+      byte_offset, frame.data, clock_->ApproximateNow(), &bytes_written);
 
   if (result == QUIC_INVALID_STREAM_DATA) {
     stream_->CloseConnectionWithDetails(
@@ -73,7 +78,11 @@ void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame) {
   }
 
   if (byte_offset == num_bytes_consumed_) {
-    stream_->OnDataAvailable();
+    if (FLAGS_quic_implement_stop_reading && ignore_read_data_) {
+      FlushBufferedFrames();
+    } else {
+      stream_->OnDataAvailable();
+    }
   }
 }
 
@@ -92,23 +101,36 @@ void QuicStreamSequencer::CloseStreamAtOffset(QuicStreamOffset offset) {
 }
 
 bool QuicStreamSequencer::MaybeCloseStream() {
-  if (!blocked_ && IsClosed()) {
-    DVLOG(1) << "Passing up termination, as we've processed "
-             << num_bytes_consumed_ << " of " << close_offset_ << " bytes.";
-    // This will cause the stream to consume the fin.
-    // Technically it's an error if num_bytes_consumed isn't exactly
-    // equal, but error handling seems silly at this point.
-    stream_->OnDataAvailable();
-    buffered_frames_.Clear();
-    num_bytes_buffered_ = 0;
-    return true;
+  if (blocked_ || !IsClosed()) {
+    return false;
   }
-  return false;
+
+  DVLOG(1) << "Passing up termination, as we've processed "
+           << num_bytes_consumed_ << " of " << close_offset_ << " bytes.";
+  // This will cause the stream to consume the FIN.
+  // Technically it's an error if |num_bytes_consumed| isn't exactly
+  // equal to |close_offset|, but error handling seems silly at this point.
+  if (FLAGS_quic_implement_stop_reading && ignore_read_data_) {
+    // The sequencer is discarding stream data and must notify the stream on
+    // receipt of a FIN because the consumer won't.
+    stream_->OnFinRead();
+  } else {
+    stream_->OnDataAvailable();
+  }
+  buffered_frames_.Clear();
+  num_bytes_buffered_ = 0;
+  return true;
 }
 
 int QuicStreamSequencer::GetReadableRegions(iovec* iov, size_t iov_len) const {
   DCHECK(!blocked_);
   return buffered_frames_.GetReadableRegions(iov, iov_len);
+}
+
+bool QuicStreamSequencer::GetReadableRegion(iovec* iov,
+                                            QuicTime* timestamp) const {
+  DCHECK(!blocked_);
+  return buffered_frames_.GetReadableRegion(iov, timestamp);
 }
 
 int QuicStreamSequencer::Readv(const struct iovec* iov, size_t iov_len) {
@@ -149,6 +171,23 @@ void QuicStreamSequencer::SetUnblocked() {
   if (IsClosed() || HasBytesToRead()) {
     stream_->OnDataAvailable();
   }
+}
+
+void QuicStreamSequencer::StopReading() {
+  if (ignore_read_data_) {
+    return;
+  }
+  ignore_read_data_ = true;
+  FlushBufferedFrames();
+}
+
+void QuicStreamSequencer::FlushBufferedFrames() {
+  DCHECK(ignore_read_data_);
+  size_t bytes_flushed = buffered_frames_.FlushBufferedFrames();
+  DVLOG(1) << "Flushing buffered data at offset " << num_bytes_consumed_
+           << " length " << bytes_flushed << " for stream " << stream_->id();
+  RecordBytesConsumed(bytes_flushed);
+  MaybeCloseStream();
 }
 
 void QuicStreamSequencer::RecordBytesConsumed(size_t bytes_consumed) {

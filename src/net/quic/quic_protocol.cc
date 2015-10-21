@@ -68,7 +68,7 @@ QuicPacketPublicHeader::QuicPacketPublicHeader(
 QuicPacketPublicHeader::~QuicPacketPublicHeader() {}
 
 QuicPacketHeader::QuicPacketHeader()
-    : packet_packet_number(0),
+    : packet_number(0),
       fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
@@ -77,7 +77,7 @@ QuicPacketHeader::QuicPacketHeader()
 
 QuicPacketHeader::QuicPacketHeader(const QuicPacketPublicHeader& header)
     : public_header(header),
-      packet_packet_number(0),
+      packet_number(0),
       fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
@@ -134,8 +134,6 @@ QuicVersionVector QuicSupportedVersions() {
 
 QuicTag QuicVersionToQuicTag(const QuicVersion version) {
   switch (version) {
-    case QUIC_VERSION_24:
-      return MakeQuicTag('Q', '0', '2', '4');
     case QUIC_VERSION_25:
       return MakeQuicTag('Q', '0', '2', '5');
     case QUIC_VERSION_26:
@@ -170,7 +168,6 @@ return #x
 
 string QuicVersionToString(const QuicVersion version) {
   switch (version) {
-    RETURN_STRING_LITERAL(QUIC_VERSION_24);
     RETURN_STRING_LITERAL(QUIC_VERSION_25);
     RETURN_STRING_LITERAL(QUIC_VERSION_26);
     RETURN_STRING_LITERAL(QUIC_VERSION_27);
@@ -215,7 +212,7 @@ ostream& operator<<(ostream& os, const QuicPacketHeader& header) {
   os << ", fec_flag: " << header.fec_flag
      << ", entropy_flag: " << header.entropy_flag
      << ", entropy hash: " << static_cast<int>(header.entropy_hash)
-     << ", packet_number: " << header.packet_packet_number
+     << ", packet_number: " << header.packet_number
      << ", is_in_fec_group:" << header.is_in_fec_group
      << ", fec_group: " << header.fec_group << "}\n";
   return os;
@@ -242,9 +239,8 @@ QuicAckFrame::QuicAckFrame()
 
 QuicAckFrame::~QuicAckFrame() {}
 
-QuicRstStreamErrorCode AdjustErrorForVersion(
-    QuicRstStreamErrorCode error_code,
-    QuicVersion version) {
+QuicRstStreamErrorCode AdjustErrorForVersion(QuicRstStreamErrorCode error_code,
+                                             QuicVersion /*version*/) {
   return error_code;
 }
 
@@ -297,8 +293,6 @@ QuicFrame::QuicFrame(QuicWindowUpdateFrame* frame)
 
 QuicFrame::QuicFrame(QuicBlockedFrame* frame)
     : type(BLOCKED_FRAME), blocked_frame(frame) {}
-
-QuicFecData::QuicFecData() : fec_group(0) {}
 
 ostream& operator<<(ostream& os, const QuicStopWaitingFrame& sent_info) {
   os << "entropy_hash: " << static_cast<int>(sent_info.entropy_hash)
@@ -626,8 +620,7 @@ ostream& operator<<(ostream& os, const QuicFrame& frame) {
 
 ostream& operator<<(ostream& os, const QuicRstStreamFrame& rst_frame) {
   os << "stream_id { " << rst_frame.stream_id << " } "
-     << "error_code { " << rst_frame.error_code << " } "
-     << "error_details { " << rst_frame.error_details << " }\n";
+     << "error_code { " << rst_frame.error_code << " }\n";
   return os;
 }
 
@@ -837,6 +830,14 @@ void RetransmittableFrames::RemoveFramesForStream(QuicStreamId stream_id) {
   }
 }
 
+AckListenerWrapper::AckListenerWrapper(QuicAckListenerInterface* listener,
+                                       QuicPacketLength data_length)
+    : ack_listener(listener), length(data_length) {
+  DCHECK(listener != nullptr);
+}
+
+AckListenerWrapper::~AckListenerWrapper() {}
+
 SerializedPacket::SerializedPacket(
     QuicPacketNumber packet_number,
     QuicPacketNumberLength packet_number_length,
@@ -896,5 +897,7 @@ TransmissionInfo::TransmissionInfo(
       is_unackable(false),
       is_fec_packet(is_fec_packet),
       all_transmissions(nullptr) {}
+
+TransmissionInfo::~TransmissionInfo() {}
 
 }  // namespace net

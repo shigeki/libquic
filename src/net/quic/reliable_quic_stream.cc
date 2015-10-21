@@ -57,11 +57,12 @@ class ReliableQuicStream::ProxyAckNotifierDelegate
   explicit ProxyAckNotifierDelegate(QuicAckListenerInterface* delegate)
       : delegate_(delegate),
         pending_acks_(0),
-        pending_bytes_(0),
         wrote_last_data_(false),
         num_retransmitted_packets_(0),
         num_retransmitted_bytes_(0) {}
 
+  // TODO(ianswett): Remove this class and indirection once OnAckNotification
+  // goes away because the above class comment is no longer true.
   void OnAckNotification(int num_retransmitted_packets,
                          int num_retransmitted_bytes,
                          QuicTime::Delta delta_largest_observed) override {
@@ -79,25 +80,16 @@ class ReliableQuicStream::ProxyAckNotifierDelegate
 
   void OnPacketAcked(int acked_bytes,
                      QuicTime::Delta delta_largest_observed) override {
-    DCHECK_LE(acked_bytes, pending_bytes_);
-    pending_bytes_ -= acked_bytes;
-    if (wrote_last_data_ && pending_bytes_ == 0) {
-      DCHECK_EQ(0, pending_bytes_);
-      delegate_->OnAckNotification(num_retransmitted_packets_,
-                                   num_retransmitted_bytes_,
-                                   delta_largest_observed);
-    }
+    delegate_->OnPacketAcked(acked_bytes, delta_largest_observed);
   }
 
   void OnPacketRetransmitted(int retransmitted_bytes) override {
-    ++num_retransmitted_packets_;
-    num_retransmitted_bytes_ += retransmitted_bytes;
+    delegate_->OnPacketRetransmitted(retransmitted_bytes);
   }
 
   void WroteData(bool last_data, size_t bytes_consumed) {
     DCHECK(!wrote_last_data_);
     ++pending_acks_;
-    pending_bytes_ += bytes_consumed;
     wrote_last_data_ = last_data;
   }
 
@@ -112,9 +104,6 @@ class ReliableQuicStream::ProxyAckNotifierDelegate
 
   // Number of outstanding acks.
   int pending_acks_;
-
-  // Number of outstanding bytes.
-  int pending_bytes_;
 
   // True if no pending writes remain.
   bool wrote_last_data_;
@@ -135,7 +124,7 @@ ReliableQuicStream::PendingData::~PendingData() {
 }
 
 ReliableQuicStream::ReliableQuicStream(QuicStreamId id, QuicSession* session)
-    : sequencer_(this),
+    : sequencer_(this, session->connection()->clock()),
       id_(id),
       session_(session),
       stream_bytes_read_(0),
@@ -172,13 +161,18 @@ void ReliableQuicStream::SetFromConfig() {
 }
 
 void ReliableQuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
-  if (read_side_closed_) {
-    DVLOG(1) << ENDPOINT << "Ignoring frame " << frame.stream_id;
-    // The subclass does not want read data:  blackhole the data.
-    return;
+  DCHECK_EQ(frame.stream_id, id_);
+
+  bool flag_value = FLAGS_quic_fix_fin_accounting;
+  if (!flag_value) {
+    if (read_side_closed_) {
+      DVLOG(1) << ENDPOINT << "Ignoring frame " << frame.stream_id;
+      // The subclass does not want to read data:  blackhole the data.
+      return;
+    }
   }
 
-  if (frame.stream_id != id_) {
+  if (!FLAGS_quic_stop_checking_for_mismatch_ids && frame.stream_id != id_) {
     session_->connection()->SendConnectionClose(QUIC_INTERNAL_ERROR);
     return;
   }
@@ -187,6 +181,14 @@ void ReliableQuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
     fin_received_ = true;
     if (fin_sent_) {
       session_->StreamDraining(id_);
+    }
+  }
+
+  if (flag_value) {
+    if (read_side_closed_) {
+      DVLOG(1) << ENDPOINT << "Ignoring data in frame " << frame.stream_id;
+      // The subclass does not want to read data:  blackhole the data.
+      return;
     }
   }
 
@@ -231,7 +233,7 @@ void ReliableQuicStream::OnStreamReset(const QuicRstStreamFrame& frame) {
 }
 
 void ReliableQuicStream::OnConnectionClosed(QuicErrorCode error,
-                                            bool from_peer) {
+                                            bool /*from_peer*/) {
   if (read_side_closed_ && write_side_closed_) {
     return;
   }
@@ -476,6 +478,15 @@ bool ReliableQuicStream::HasBufferedData() const {
 
 QuicVersion ReliableQuicStream::version() const {
   return session_->connection()->version();
+}
+
+void ReliableQuicStream::StopReading() {
+  if (!FLAGS_quic_implement_stop_reading) {
+    CloseReadSide();
+    return;
+  }
+  DVLOG(1) << ENDPOINT << "Stop reading from stream " << id();
+  sequencer_.StopReading();
 }
 
 void ReliableQuicStream::OnClose() {

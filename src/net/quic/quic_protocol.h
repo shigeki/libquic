@@ -19,6 +19,7 @@
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 #include "net/base/int128.h"
@@ -26,6 +27,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/quic/interval_set.h"
+#include "net/quic/quic_ack_listener_interface.h"
 #include "net/quic/quic_bandwidth.h"
 #include "net/quic/quic_time.h"
 #include "net/quic/quic_types.h"
@@ -342,7 +344,6 @@ enum QuicVersion {
   // Special case to indicate unknown/unsupported QUIC version.
   QUIC_VERSION_UNSUPPORTED = 0,
 
-  QUIC_VERSION_24 = 24,  // SPDY/4 header compression.
   QUIC_VERSION_25 = 25,  // SPDY/4 header keys, and removal of error_details
                          // from QuicRstStreamFrame
   QUIC_VERSION_26 = 26,  // In CHLO, send XLCT tag containing hash of leaf cert
@@ -358,8 +359,7 @@ enum QuicVersion {
 // IMPORTANT: if you are adding to this list, follow the instructions at
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {
-    QUIC_VERSION_28, QUIC_VERSION_27, QUIC_VERSION_26, QUIC_VERSION_25,
-    QUIC_VERSION_24};
+    QUIC_VERSION_28, QUIC_VERSION_27, QUIC_VERSION_26, QUIC_VERSION_25};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
@@ -657,7 +657,7 @@ struct NET_EXPORT_PRIVATE QuicPacketHeader {
       std::ostream& os, const QuicPacketHeader& s);
 
   QuicPacketPublicHeader public_header;
-  QuicPacketNumber packet_packet_number;
+  QuicPacketNumber packet_number;
   bool fec_flag;
   bool entropy_flag;
   QuicPacketEntropyHash entropy_hash;
@@ -914,8 +914,6 @@ struct NET_EXPORT_PRIVATE QuicRstStreamFrame {
 
   QuicStreamId stream_id;
   QuicRstStreamErrorCode error_code;
-  // Only used in versions <= QUIC_VERSION_24.
-  std::string error_details;
 
   // Used to update flow control windows. On termination of a stream, both
   // endpoints must inform the peer of the number of bytes they have sent on
@@ -1039,16 +1037,6 @@ static_assert(sizeof(QuicFrame) <= 16,
 
 typedef std::vector<QuicFrame> QuicFrames;
 
-struct NET_EXPORT_PRIVATE QuicFecData {
-  QuicFecData();
-
-  // The FEC group number is also the packet number of the first
-  // FEC protected packet.  The last protected packet's packet number will
-  // be one less than the packet number of the FEC packet.
-  QuicFecGroupNumber fec_group;
-  base::StringPiece redundancy;
-};
-
 class NET_EXPORT_PRIVATE QuicData {
  public:
   QuicData(const char* buffer, size_t length);
@@ -1156,6 +1144,15 @@ class NET_EXPORT_PRIVATE RetransmittableFrames {
   DISALLOW_COPY_AND_ASSIGN(RetransmittableFrames);
 };
 
+struct NET_EXPORT_PRIVATE AckListenerWrapper {
+  AckListenerWrapper(QuicAckListenerInterface* listener,
+                     QuicPacketLength data_length);
+  ~AckListenerWrapper();
+
+  scoped_refptr<QuicAckListenerInterface> ack_listener;
+  QuicPacketLength length;
+};
+
 struct NET_EXPORT_PRIVATE SerializedPacket {
   SerializedPacket(QuicPacketNumber packet_number,
                    QuicPacketNumberLength packet_number_length,
@@ -1177,6 +1174,7 @@ struct NET_EXPORT_PRIVATE SerializedPacket {
 
   // Optional notifiers which will be informed when this packet has been ACKed.
   std::list<QuicAckNotifier*> notifiers;
+  std::list<AckListenerWrapper> listeners;
 };
 
 struct NET_EXPORT_PRIVATE TransmissionInfo {
@@ -1191,6 +1189,8 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
                    QuicTime sent_time,
                    QuicPacketLength bytes_sent,
                    bool is_fec_packet);
+
+  ~TransmissionInfo();
 
   RetransmittableFrames* retransmittable_frames;
   QuicPacketNumberLength packet_number_length;
@@ -1208,7 +1208,11 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
   // Stores the packet numbers of all transmissions of this packet.
   // Must always be nullptr or have multiple elements.
   PacketNumberList* all_transmissions;
+  // Non-empty if there is a listener for this packet.
+  std::list<AckListenerWrapper> ack_listeners;
 };
+static_assert(sizeof(QuicFrame) <= 64,
+              "Keep the TransmissionInfo size to a cacheline.");
 
 // Convenience wrapper to wrap an iovec array and the total length, which must
 // be less than or equal to the actual total length of the iovecs.

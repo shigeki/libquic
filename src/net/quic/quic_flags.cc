@@ -54,17 +54,9 @@ bool FLAGS_quic_limit_max_cwnd = true;
 // TODO(rtenneti): Enable this flag after CryptoServerTest's are fixed.
 bool FLAGS_quic_require_handshake_confirmation = false;
 
-// Disables special treatment of truncated acks, since older retransmissions are
-// proactively discarded in QUIC.
-bool FLAGS_quic_disable_truncated_ack_handling = true;
-
 // If true, after a server silo receives a packet from a migrated QUIC
 // client, a GO_AWAY frame is sent to the client.
 bool FLAGS_send_goaway_after_client_migration = true;
-
-// Close the connection instead of attempting to write a packet out of sequence
-// number order.
-bool FLAGS_quic_close_connection_out_of_order_sending = true;
 
 // QUIC-specific flag. If true, Cubic's epoch is reset when the sender is
 // application-limited.
@@ -85,3 +77,29 @@ bool FLAGS_allow_many_available_streams = true;
 // recvmmsg fills all of the passed in messages. Otherwise, it will return true
 // if recvmmsg read any messages.
 bool FLAGS_quic_read_packets_full_recvmmsg = true;
+
+// If true, QUIC will measure head of line (HOL) blocking due between
+// streams due to packet losses on the headers stream.  The
+// measurements will be surfaced via UMA histogram
+// Net.QuicSession.HeadersHOLBlockedTime.
+bool FLAGS_quic_measure_headers_hol_blocking_time = true;
+
+// If true, skip a check for mismatched stream IDs inside
+// ReliableQuicStream::OnStreamFrame.
+bool FLAGS_quic_stop_checking_for_mismatch_ids = true;
+
+// Disable QUIC's userspace pacing.
+bool FLAGS_quic_disable_pacing = false;
+
+// If true, a FIN received on a stream with read_side_closed_ true will be
+// recorded correctly.
+bool FLAGS_quic_fix_fin_accounting = true;
+
+// If true, ReliableQuicStream::StopReading (formerly CloseReadSide) causes
+// incoming data to be ignored but the read side of the stream object is not
+// closed.
+bool FLAGS_quic_implement_stop_reading = true;
+
+// Invoke the QuicAckListener directly, instead of going through the AckNotifier
+// and AckNotifierManager.
+bool FLAGS_quic_no_ack_notifier = true;
