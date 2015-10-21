@@ -73,6 +73,7 @@ set(
 	src/net/quic/quic_ack_notifier_manager.cc
 	src/net/quic/quic_connection_stats.cc
 	src/net/quic/quic_fec_group.cc
+	src/net/quic/quic_fec_group_interface.cc
 	src/net/quic/quic_data_writer.cc
 	src/net/quic/quic_data_reader.cc
 	src/net/quic/quic_session.cc
