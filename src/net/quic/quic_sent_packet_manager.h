@@ -16,7 +16,6 @@
 #include "net/quic/congestion_control/loss_detection_interface.h"
 #include "net/quic/congestion_control/rtt_stats.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
-#include "net/quic/quic_ack_notifier_manager.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_sustained_bandwidth_recorder.h"
 #include "net/quic/quic_unacked_packet_map.h"
@@ -94,8 +93,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
                         const QuicClock* clock,
                         QuicConnectionStats* stats,
                         CongestionControlType congestion_control_type,
-                        LossDetectionType loss_type,
-                        bool is_secure);
+                        LossDetectionType loss_type);
   virtual ~QuicSentPacketManager();
 
   virtual void SetFromConfig(const QuicConfig& config);
@@ -208,9 +206,6 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // TCP segments, aka ssthresh.  Some send algorithms do not define a slow
   // start threshold and will return 0.
   QuicPacketCount GetSlowStartThresholdInTcpMss() const;
-
-  // Called by the connection every time it receives a serialized packet.
-  void OnSerializedPacket(const SerializedPacket& serialized_packet);
 
   // No longer retransmit data for |stream_id|.
   void CancelRetransmissionsForStream(QuicStreamId stream_id);
@@ -352,11 +347,6 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   // Tracks if the connection was created by the server or the client.
   Perspective perspective_;
-
-  // An AckNotifier can register to be informed when ACKs have been received for
-  // all packets that a given block of data was sent in. The AckNotifierManager
-  // maintains the currently active notifiers.
-  AckNotifierManager ack_notifier_manager_;
 
   const QuicClock* clock_;
   QuicConnectionStats* stats_;

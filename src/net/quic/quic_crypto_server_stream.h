@@ -33,11 +33,6 @@ class NET_EXPORT_PRIVATE ServerHelloNotifier : public QuicAckListenerInterface {
   explicit ServerHelloNotifier(QuicCryptoServerStream* stream)
       : server_stream_(stream) {}
 
-  // QuicAckListenerInterface implementation
-  void OnAckNotification(int num_retransmitted_packets,
-                         int num_retransmitted_bytes,
-                         QuicTime::Delta delta_largest_observed) override;
-
   void OnPacketAcked(int acked_bytes,
                      QuicTime::Delta delta_largest_observed) override;
 
@@ -95,15 +90,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerStream : public QuicCryptoStream {
 
   bool use_stateless_rejects_if_peer_supported() const {
     return use_stateless_rejects_if_peer_supported_;
-  }
-
-  // Used by the quic dispatcher to indicate that this crypto server
-  // stream should use stateless rejects, so long as stateless rejects
-  // are supported by the client.
-  void set_use_stateless_rejects_if_peer_supported(
-      bool use_stateless_rejects_if_peer_supported) {
-    use_stateless_rejects_if_peer_supported_ =
-        use_stateless_rejects_if_peer_supported;
   }
 
   bool peer_supports_stateless_rejects() const {

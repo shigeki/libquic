@@ -6,8 +6,8 @@
 // In each direction, the data on such a stream first contains compressed
 // headers then body data.
 
-#ifndef NET_QUIC_QUIC_DATA_STREAM_H_
-#define NET_QUIC_QUIC_DATA_STREAM_H_
+#ifndef NET_QUIC_QUIC_SPDY_STREAM_H_
+#define NET_QUIC_QUIC_SPDY_STREAM_H_
 
 #include <sys/types.h>
 
@@ -19,7 +19,6 @@
 #include "net/base/iovec.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_stream_sequencer.h"
 #include "net/quic/reliable_quic_stream.h"
@@ -28,14 +27,14 @@
 namespace net {
 
 namespace test {
-class QuicDataStreamPeer;
+class QuicSpdyStreamPeer;
 class ReliableQuicStreamPeer;
 }  // namespace test
 
 class QuicSpdySession;
 
-// A QUIC data stream that can also send and receive headers.
-class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
+// A QUIC stream that can send and receive HTTP2 (SPDY) headers.
+class NET_EXPORT_PRIVATE QuicSpdyStream : public ReliableQuicStream {
  public:
   // Visitor receives callbacks from the stream.
   class NET_EXPORT_PRIVATE Visitor {
@@ -43,7 +42,7 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
     Visitor() {}
 
     // Called when the stream is closed.
-    virtual void OnClose(QuicDataStream* stream) = 0;
+    virtual void OnClose(QuicSpdyStream* stream) = 0;
 
    protected:
     virtual ~Visitor() {}
@@ -52,8 +51,8 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
     DISALLOW_COPY_AND_ASSIGN(Visitor);
   };
 
-  QuicDataStream(QuicStreamId id, QuicSpdySession* spdy_session);
-  ~QuicDataStream() override;
+  QuicSpdyStream(QuicStreamId id, QuicSpdySession* spdy_session);
+  ~QuicSpdyStream() override;
 
   // ReliableQuicStream implementation
   void OnClose() override;
@@ -78,6 +77,10 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
   // delilvered to this stream.  If |fin| is true, then this stream
   // should be closed; no more data will be sent by the peer.
   virtual void OnStreamHeadersComplete(bool fin, size_t frame_len);
+
+  // Override the base class to not discard response when receiving
+  // QUIC_STREAM_NO_ERROR on QUIC_VERSION_29 and later versions.
+  void OnStreamReset(const QuicRstStreamFrame& frame) override;
 
   // Writes the headers contained in |header_block| to the dedicated
   // headers stream.
@@ -118,7 +121,7 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
   bool FinishedReadingHeaders() const;
 
  private:
-  friend class test::QuicDataStreamPeer;
+  friend class test::QuicSpdyStreamPeer;
   friend class test::ReliableQuicStreamPeer;
   friend class QuicStreamUtils;
 
@@ -133,9 +136,9 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
   // via ProcessData or Readv.
   std::string decompressed_headers_;
 
-  DISALLOW_COPY_AND_ASSIGN(QuicDataStream);
+  DISALLOW_COPY_AND_ASSIGN(QuicSpdyStream);
 };
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_DATA_STREAM_H_
+#endif  // NET_QUIC_QUIC_SPDY_STREAM_H_

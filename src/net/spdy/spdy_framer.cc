@@ -955,9 +955,8 @@ void SpdyFramer::ProcessControlFrameHeader(int control_frame_type_field) {
       }
       break;
     case RST_STREAM:
-      // For SPDY versions < 4, the header has a fixed length.
-      // For SPDY version 4 and up, the RST_STREAM frame may include optional
-      // opaque data, so we only have a lower limit on the frame size.
+      // TODO(bnc): Enforce the length of the header, and change error to
+      // FRAME_SIZE_ERROR.
       if ((current_frame_length_ != GetRstStreamMinimumSize() &&
            protocol_version() <= SPDY3) ||
           (current_frame_length_ < GetRstStreamMinimumSize() &&
@@ -1666,8 +1665,8 @@ size_t SpdyFramer::ProcessControlFrameHeaderBlock(const char* data,
   size_t process_bytes = std::min(
       data_len, remaining_data_length_ - remaining_padding_payload_length_);
   if (is_hpack_header_block) {
-    if (!GetHpackDecoder()->HandleControlFrameHeadersData(
-            current_frame_stream_id_, data, process_bytes)) {
+    if (!GetHpackDecoder()->HandleControlFrameHeadersData(data,
+                                                          process_bytes)) {
       // TODO(jgraettinger): Finer-grained HPACK error codes.
       set_error(SPDY_DECOMPRESS_FAILURE);
       processed_successfully = false;
@@ -1690,7 +1689,7 @@ size_t SpdyFramer::ProcessControlFrameHeaderBlock(const char* data,
       if (is_hpack_header_block) {
         size_t compressed_len = 0;
         if (GetHpackDecoder()->HandleControlFrameHeadersComplete(
-                current_frame_stream_id_, &compressed_len)) {
+                &compressed_len)) {
           // TODO(jgraettinger): To be removed with migration to
           // SpdyHeadersHandlerInterface. Serializes the HPACK block as a SPDY3
           // block, delivered via reentrant call to
@@ -2218,7 +2217,7 @@ size_t SpdyFramer::ProcessIgnoredControlFramePayload(/*const char* data,*/
   return original_len - len;
 }
 
-size_t SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
+bool SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
                                           size_t header_length,
                                           SpdyHeaderBlock* block) const {
   SpdyFrameReader reader(header_data, header_length);
@@ -2229,13 +2228,13 @@ size_t SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
     uint16 temp;
     if (!reader.ReadUInt16(&temp)) {
       DVLOG(1) << "Unable to read number of headers.";
-      return 0;
+      return false;
     }
     num_headers = temp;
   } else {
     if (!reader.ReadUInt32(&num_headers)) {
       DVLOG(1) << "Unable to read number of headers.";
-      return 0;
+      return false;
     }
   }
 
@@ -2248,7 +2247,7 @@ size_t SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
                             : !reader.ReadStringPiece32(&temp)) {
       DVLOG(1) << "Unable to read header name (" << index + 1 << " of "
                << num_headers << ").";
-      return 0;
+      return false;
     }
     std::string name = temp.as_string();
 
@@ -2257,7 +2256,7 @@ size_t SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
                             : !reader.ReadStringPiece32(&temp)) {
       DVLOG(1) << "Unable to read header value (" << index + 1 << " of "
                << num_headers << ").";
-      return 0;
+      return false;
     }
     std::string value = temp.as_string();
 
@@ -2265,13 +2264,20 @@ size_t SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
     if (block->find(name) != block->end()) {
       DVLOG(1) << "Duplicate header '" << name << "' (" << index + 1 << " of "
                << num_headers << ").";
-      return 0;
+      return false;
     }
 
     // Store header.
     (*block)[name] = value;
   }
-  return reader.GetBytesConsumed();
+  if (reader.GetBytesConsumed() != header_length) {
+    LOG(DFATAL) << "Buffer expected to consist entirely of headers, but only "
+                << reader.GetBytesConsumed() << " bytes consumed, from "
+                << header_length;
+    return false;
+  }
+
+  return true;
 }
 
 SpdySerializedFrame* SpdyFramer::SerializeData(
@@ -2437,9 +2443,6 @@ SpdySerializedFrame* SpdyFramer::SerializeRstStream(
   // commented but left in place to simplify future patching.
   // Compute the output buffer size, taking opaque data into account.
   size_t expected_length = GetRstStreamMinimumSize();
-  if (protocol_version() > SPDY3) {
-    expected_length += rst_stream.description().size();
-  }
   SpdyFrameBuilder builder(expected_length, protocol_version());
 
   // Serialize the RST_STREAM frame.
@@ -2452,12 +2455,6 @@ SpdySerializedFrame* SpdyFramer::SerializeRstStream(
 
   builder.WriteUInt32(SpdyConstants::SerializeRstStreamStatus(
       protocol_version(), rst_stream.status()));
-
-  // In HTTP2 and up, RST_STREAM frames may also specify opaque data.
-  if (protocol_version() > SPDY3 && rst_stream.description().size() > 0) {
-    builder.WriteBytes(rst_stream.description().data(),
-                       rst_stream.description().size());
-  }
 
   DCHECK_EQ(expected_length, builder.length());
   return builder.take();

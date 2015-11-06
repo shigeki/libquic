@@ -6,7 +6,6 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_fec_group.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
@@ -124,11 +123,11 @@ void QuicPacketGenerator::AddControlFrame(const QuicFrame& frame) {
 
 QuicConsumedData QuicPacketGenerator::ConsumeData(
     QuicStreamId id,
-    const QuicIOVector& iov,
+    QuicIOVector iov,
     QuicStreamOffset offset,
     bool fin,
     FecProtection fec_protection,
-    QuicAckListenerInterface* delegate) {
+    QuicAckListenerInterface* listener) {
   bool has_handshake = id == kCryptoStreamId;
   // To make reasoning about crypto frames easier, we don't combine them with
   // other retransmittable frames in a single packet.
@@ -147,13 +146,6 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(
     MaybeStartFecProtection();
   }
 
-  // This notifier will be owned by the AckNotifierManager (or deleted below) if
-  // not attached to a packet.
-  QuicAckNotifier* notifier = nullptr;
-  if (delegate != nullptr) {
-    notifier = new QuicAckNotifier(delegate);
-  }
-
   if (!fin && (iov.total_length == 0)) {
     LOG(DFATAL) << "Attempt to consume empty data without FIN.";
     return QuicConsumedData(0, false);
@@ -169,18 +161,15 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(
         &frame, &buffer);
     ++frames_created;
 
-    // We want to track which packet this stream frame ends up in.
-    if (notifier != nullptr) {
-      ack_notifiers_.push_back(notifier);
-    }
-
     if (!AddFrame(frame, buffer.Pass(), has_handshake)) {
       LOG(DFATAL) << "Failed to add stream frame.";
       // Inability to add a STREAM frame creates an unrecoverable hole in a
       // the stream, so it's best to close the connection.
       delegate_->CloseConnection(QUIC_INTERNAL_ERROR, false);
-      delete notifier;
       return QuicConsumedData(0, false);
+    }
+    if (listener != nullptr) {
+      ack_listeners_.push_back(AckListenerWrapper(listener, bytes_consumed));
     }
 
     total_bytes_consumed += bytes_consumed;
@@ -208,18 +197,13 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(
     }
   }
 
-  if (notifier != nullptr && frames_created == 0) {
-    // Safe to delete the AckNotifer as it was never attached to a packet.
-    delete notifier;
-  }
-
   // Don't allow the handshake to be bundled with other retransmittable frames.
   if (has_handshake) {
     SendQueuedFrames(/*flush=*/true, /*is_fec_timeout=*/false);
   }
 
   // Try to close FEC group since we've either run out of data to send or we're
-  // blocked. If not in batch mode, force close the group.
+  // blocked.
   MaybeSendFecPacketAndCloseGroup(/*force=*/false, /*is_fec_timeout=*/false);
 
   DCHECK(InBatchMode() || !packet_creator_.HasPendingFrames());
@@ -228,18 +212,9 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(
 
 void QuicPacketGenerator::GenerateMtuDiscoveryPacket(
     QuicByteCount target_mtu,
-    QuicAckListenerInterface* delegate) {
+    QuicAckListenerInterface* listener) {
   // MTU discovery frames must be sent by themselves.
   DCHECK(!InBatchMode() && !packet_creator_.HasPendingFrames());
-
-  // If an ack notifier delegate is provided, register it.
-  if (delegate) {
-    QuicAckNotifier* ack_notifier = new QuicAckNotifier(delegate);
-    // The notifier manager will take the ownership of the notifier after the
-    // packet is sent.
-    ack_notifiers_.push_back(ack_notifier);
-  }
-
   const QuicByteCount current_mtu = GetMaxPacketLength();
 
   // The MTU discovery frame is allocated on the stack, since it is going to be
@@ -250,6 +225,9 @@ void QuicPacketGenerator::GenerateMtuDiscoveryPacket(
   // Send the probe packet with the new length.
   SetMaxPacketLength(target_mtu, /*force=*/true);
   const bool success = AddFrame(frame, nullptr, /*needs_padding=*/true);
+  if (listener != nullptr) {
+    ack_listeners_.push_back(AckListenerWrapper(listener, 0));
+  }
   SerializeAndSendPacket();
   // The only reason AddFrame can fail is that the packet is too full to fit in
   // a ping.  This is not possible for any sane MTU.
@@ -310,28 +288,28 @@ void QuicPacketGenerator::MaybeStartFecProtection() {
 
 void QuicPacketGenerator::MaybeSendFecPacketAndCloseGroup(bool force,
                                                           bool is_fec_timeout) {
-  if (!ShouldSendFecPacket(force)) {
-    return;
+  if (ShouldSendFecPacket(force)) {
+    // If we want to send FEC packet only when FEC alaram goes off and if it is
+    // not a FEC timeout then close the group and dont send FEC packet.
+    if (fec_send_policy_ == FEC_ALARM_TRIGGER && !is_fec_timeout) {
+      ResetFecGroup();
+    } else {
+      // TODO(jri): SerializeFec can return a NULL packet, and this should cause
+      // an early return, with a call to delegate_->OnPacketGenerationError.
+      char buffer[kMaxPacketSize];
+      SerializedPacket serialized_fec =
+          packet_creator_.SerializeFec(buffer, kMaxPacketSize);
+      DCHECK(serialized_fec.packet);
+      delegate_->OnSerializedPacket(serialized_fec);
+    }
   }
 
-  // If we want to send FEC packet only when FEC alaram goes off and if it is
-  // not a FEC timeout then close the group and dont send FEC packet.
-  if (fec_send_policy_ == FEC_ALARM_TRIGGER && !is_fec_timeout) {
-    ResetFecGroup();
-  } else {
-    // TODO(jri): SerializeFec can return a NULL packet, and this should
-    // cause an early return, with a call to delegate_->OnPacketGenerationError.
-    char buffer[kMaxPacketSize];
-    SerializedPacket serialized_fec =
-        packet_creator_.SerializeFec(buffer, kMaxPacketSize);
-    DCHECK(serialized_fec.packet);
-    delegate_->OnSerializedPacket(serialized_fec);
-  }
   // Turn FEC protection off if creator's protection is on and the creator
   // does not have an open FEC group.
   // Note: We only wait until the frames queued in the creator are flushed;
   // pending frames in the generator will not keep us from turning FEC off.
-  if (!should_fec_protect_ && !packet_creator_.IsFecGroupOpen()) {
+  if (!should_fec_protect_ && packet_creator_.IsFecProtected() &&
+      !packet_creator_.IsFecGroupOpen()) {
     packet_creator_.StopFecProtectingPackets();
     DCHECK(!packet_creator_.IsFecProtected());
   }
@@ -462,9 +440,9 @@ void QuicPacketGenerator::SerializeAndSendPacket() {
     return;
   }
 
-  // There may be AckNotifiers interested in this packet.
-  serialized_packet.notifiers.swap(ack_notifiers_);
-  ack_notifiers_.clear();
+  // There may be AckListeners interested in this packet.
+  serialized_packet.listeners.swap(ack_listeners_);
+  ack_listeners_.clear();
 
   delegate_->OnSerializedPacket(serialized_packet);
   MaybeSendFecPacketAndCloseGroup(/*force=*/false, /*is_fec_timeout=*/false);

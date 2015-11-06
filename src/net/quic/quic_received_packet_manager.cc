@@ -145,7 +145,7 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     QuicByteCount bytes,
     const QuicPacketHeader& header,
     QuicTime receipt_time) {
-  QuicPacketNumber packet_number = header.packet_packet_number;
+  QuicPacketNumber packet_number = header.packet_number;
   DCHECK(IsAwaitingPacket(packet_number));
 
   // Adds the range of packet numbers from max(largest observed + 1, least
@@ -176,15 +176,18 @@ void QuicReceivedPacketManager::RecordPacketReceived(
   }
   entropy_tracker_.RecordPacketEntropyHash(packet_number, header.entropy_hash);
 
-  received_packet_times_.push_back(std::make_pair(packet_number, receipt_time));
+  ack_frame_.received_packet_times.push_back(
+      std::make_pair(packet_number, receipt_time));
 
-  ack_frame_.revived_packets.erase(packet_number);
+  if (ack_frame_.latest_revived_packet == packet_number) {
+    ack_frame_.latest_revived_packet = 0;
+  }
 }
 
 void QuicReceivedPacketManager::RecordPacketRevived(
     QuicPacketNumber packet_number) {
   LOG_IF(DFATAL, !IsAwaitingPacket(packet_number));
-  ack_frame_.revived_packets.insert(packet_number);
+  ack_frame_.latest_revived_packet = packet_number;
 }
 
 bool QuicReceivedPacketManager::IsMissing(QuicPacketNumber packet_number) {
@@ -226,11 +229,23 @@ void QuicReceivedPacketManager::UpdateReceivedPacketInfo(
           QuicTime::Delta::Zero() :
           approximate_now.Subtract(time_largest_observed_);
 
-  // Remove all packets that are too far from largest_observed to express.
-  received_packet_times_.remove_if(isTooLarge(ack_frame_.largest_observed));
+  // Clear all packet times if any are too far from largest observed.
+  // It's expected this is extremely rare.
+  for (PacketTimeVector::iterator it = ack_frame_.received_packet_times.begin();
+       it != ack_frame_.received_packet_times.end();) {
+    if (ack_frame_.largest_observed - it->first >=
+        numeric_limits<uint8>::max()) {
+      it = ack_frame_.received_packet_times.erase(it);
+    } else {
+      ++it;
+    }
+  }
 
+  // TODO(ianswett): Instead of transferring all the information over,
+  // consider giving the QuicPacketGenerator a reference to this ack frame
+  // and clear it afterwards.
   ack_frame->received_packet_times.clear();
-  ack_frame->received_packet_times.swap(received_packet_times_);
+  ack_frame->received_packet_times.swap(ack_frame_.received_packet_times);
 }
 
 QuicPacketEntropyHash QuicReceivedPacketManager::EntropyHash(
@@ -240,9 +255,9 @@ QuicPacketEntropyHash QuicReceivedPacketManager::EntropyHash(
 
 bool QuicReceivedPacketManager::DontWaitForPacketsBefore(
     QuicPacketNumber least_unacked) {
-  ack_frame_.revived_packets.erase(
-      ack_frame_.revived_packets.begin(),
-      ack_frame_.revived_packets.lower_bound(least_unacked));
+  if (ack_frame_.latest_revived_packet < least_unacked) {
+    ack_frame_.latest_revived_packet = 0;
+  }
   return ack_frame_.missing_packets.RemoveUpTo(least_unacked);
 }
 

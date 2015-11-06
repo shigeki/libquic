@@ -20,13 +20,6 @@ using std::string;
 
 namespace net {
 
-void ServerHelloNotifier::OnAckNotification(
-    int num_retransmitted_packets,
-    int num_retransmitted_bytes,
-    QuicTime::Delta delta_largest_observed) {
-  server_stream_->OnServerHelloAcked();
-}
-
 void ServerHelloNotifier::OnPacketAcked(
     int acked_bytes,
     QuicTime::Delta delta_largest_observed) {
@@ -45,7 +38,8 @@ QuicCryptoServerStream::QuicCryptoServerStream(
       num_handshake_messages_(0),
       num_handshake_messages_with_server_nonces_(0),
       num_server_config_update_messages_sent_(0),
-      use_stateless_rejects_if_peer_supported_(false),
+      use_stateless_rejects_if_peer_supported_(
+          FLAGS_enable_quic_stateless_reject_support),
       peer_supports_stateless_rejects_(false) {
   DCHECK_EQ(Perspective::IS_SERVER, session->connection()->perspective());
 }
@@ -100,7 +94,7 @@ void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
   DCHECK(validate_client_hello_cb_ != nullptr);
   validate_client_hello_cb_ = nullptr;
 
-  if (FLAGS_enable_quic_stateless_reject_support) {
+  if (use_stateless_rejects_if_peer_supported_) {
     peer_supports_stateless_rejects_ = DoesPeerSupportStatelessRejects(message);
   }
 
@@ -115,7 +109,26 @@ void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
   }
 
   if (reply.tag() != kSHLO) {
+    if (reply.tag() == kSREJ) {
+      DCHECK(use_stateless_rejects_if_peer_supported());
+      DCHECK(peer_supports_stateless_rejects());
+      // Before sending the SREJ, cause the connection to save crypto packets
+      // so that they can be added to the time wait list manager and
+      // retransmitted.
+      session()->connection()->EnableSavingCryptoPackets();
+    }
     SendHandshakeMessage(reply);
+
+    if (reply.tag() == kSREJ) {
+      DCHECK(use_stateless_rejects_if_peer_supported());
+      DCHECK(peer_supports_stateless_rejects());
+      DCHECK(!handshake_confirmed());
+      DVLOG(1) << "Closing connection "
+               << session()->connection()->connection_id()
+               << " because of a stateless reject.";
+      session()->connection()->CloseConnection(
+          QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT, /* from_peer */ false);
+    }
     return;
   }
 
@@ -176,7 +189,7 @@ void QuicCryptoServerStream::SendServerConfigUpdate(
 
   CryptoHandshakeMessage server_config_update_message;
   if (!crypto_config_->BuildServerConfigUpdateMessage(
-          previous_source_address_tokens_,
+          session()->connection()->version(), previous_source_address_tokens_,
           session()->connection()->self_address().address(),
           session()->connection()->peer_address().address(),
           session()->connection()->clock(),
@@ -251,7 +264,6 @@ QuicErrorCode QuicCryptoServerStream::ProcessClientHello(
   previous_source_address_tokens_ = result.info.source_address_tokens;
 
   const bool use_stateless_rejects_in_crypto_config =
-      FLAGS_enable_quic_stateless_reject_support &&
       use_stateless_rejects_if_peer_supported_ &&
       peer_supports_stateless_rejects_;
   QuicConnection* connection = session()->connection();

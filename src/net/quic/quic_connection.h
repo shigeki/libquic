@@ -30,8 +30,6 @@
 #include "base/strings/string_piece.h"
 #include "net/base/ip_endpoint.h"
 #include "net/quic/crypto/quic_decrypter.h"
-#include "net/quic/quic_ack_notifier.h"
-#include "net/quic/quic_ack_notifier_manager.h"
 #include "net/quic/quic_alarm.h"
 #include "net/quic/quic_blocked_writer_interface.h"
 #include "net/quic/quic_connection_stats.h"
@@ -294,7 +292,6 @@ class NET_EXPORT_PRIVATE QuicConnection
                  const PacketWriterFactory& writer_factory,
                  bool owns_writer,
                  Perspective perspective,
-                 bool is_secure,
                  const QuicVersionVector& supported_versions);
   ~QuicConnection() override;
 
@@ -321,15 +318,15 @@ class NET_EXPORT_PRIVATE QuicConnection
   // data is to be FEC protected. Note that data that is sent immediately
   // following MUST_FEC_PROTECT data may get protected by falling within the
   // same FEC group.
-  // If |delegate| is provided, then it will be informed once ACKs have been
+  // If |listener| is provided, then it will be informed once ACKs have been
   // received for all the packets written in this call.
-  // The |delegate| is not owned by the QuicConnection and must outlive it.
+  // The |listener| is not owned by the QuicConnection and must outlive it.
   QuicConsumedData SendStreamData(QuicStreamId id,
-                                  const QuicIOVector& iov,
+                                  QuicIOVector iov,
                                   QuicStreamOffset offset,
                                   bool fin,
                                   FecProtection fec_protection,
-                                  QuicAckListenerInterface* delegate);
+                                  QuicAckListenerInterface* listener);
 
   // Send a RST_STREAM frame to the peer.
   virtual void SendRstStream(QuicStreamId id,
@@ -426,7 +423,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
-  void OnFecData(const QuicFecData& fec) override;
+  void OnFecData(base::StringPiece redundnancy) override;
   void OnPacketComplete() override;
 
   // QuicPacketGenerator::DelegateInterface
@@ -482,9 +479,9 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Testing only.
   size_t NumQueuedPackets() const { return queued_packets_.size(); }
 
-  QuicEncryptedPacket* ReleaseConnectionClosePacket() {
-    return connection_close_packet_.release();
-  }
+  // Once called, any sent crypto packets to be saved as the
+  // termination packet, for use with stateless rejections.
+  void EnableSavingCryptoPackets();
 
   // Returns true if the underlying UDP socket is writable, there is
   // no queued data and the connection is not congestion-control
@@ -611,8 +608,6 @@ class NET_EXPORT_PRIVATE QuicConnection
   QuicPacketWriter* writer() { return writer_; }
   const QuicPacketWriter* writer() const { return writer_; }
 
-  bool is_secure() const { return is_secure_; }
-
   // Sends an MTU discovery packet of size |target_mtu|.  If the packet is
   // acknowledged by the peer, the maximum packet size will be increased to
   // |target_mtu|.
@@ -626,6 +621,10 @@ class NET_EXPORT_PRIVATE QuicConnection
   const char* cipher_name() const { return framer_.decrypter()->cipher_name(); }
   // Return the id of the cipher of the primary decrypter of the framer.
   uint32 cipher_id() const { return framer_.decrypter()->cipher_id(); }
+
+  std::vector<QuicEncryptedPacket*>* termination_packets() {
+    return termination_packets_.get();
+  }
 
  protected:
   // Packets which have not been written to the wire.
@@ -657,6 +656,9 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   QuicConnectionHelperInterface* helper() { return helper_; }
 
+  // On peer address changes, determine and return the change type.
+  virtual PeerAddressChangeType DeterminePeerAddressChangeType();
+
   // Selects and updates the version of the protocol being used by selecting a
   // version from |available_versions| which is also supported. Returns true if
   // such a version exists, false otherwise.
@@ -665,6 +667,10 @@ class NET_EXPORT_PRIVATE QuicConnection
   bool peer_ip_changed() const { return peer_ip_changed_; }
 
   bool peer_port_changed() const { return peer_port_changed_; }
+
+  const IPAddressNumber& migrating_peer_ip() const {
+    return migrating_peer_ip_;
+  }
 
  private:
   friend class test::QuicConnectionPeer;
@@ -770,7 +776,7 @@ class NET_EXPORT_PRIVATE QuicConnection
                                 const IPEndPoint& peer_address);
 
   HasRetransmittableData IsRetransmittable(const QueuedPacket& packet);
-  bool IsConnectionClose(const QueuedPacket& packet);
+  bool IsTerminationPacket(const QueuedPacket& packet);
 
   // Set the size of the packet we are targeting while doing path MTU discovery.
   void SetMtuDiscoveryTarget(QuicByteCount target);
@@ -840,8 +846,11 @@ class NET_EXPORT_PRIVATE QuicConnection
   // unacked_packets_ if they are to be retransmitted.
   QueuedPacketList queued_packets_;
 
-  // Contains the connection close packet if the connection has been closed.
-  scoped_ptr<QuicEncryptedPacket> connection_close_packet_;
+  // If true, then crypto packets will be saved as termination packets.
+  bool save_crypto_packets_as_termination_packets_;
+
+  // Contains the connection close packets if the connection has been closed.
+  scoped_ptr<std::vector<QuicEncryptedPacket*>> termination_packets_;
 
   // When true, the connection does not send a close packet on timeout.
   bool silent_close_enabled_;
@@ -947,9 +956,6 @@ class NET_EXPORT_PRIVATE QuicConnection
   // If non-empty this contains the set of versions received in a
   // version negotiation packet.
   QuicVersionVector server_supported_versions_;
-
-  // True if this is a secure QUIC connection.
-  bool is_secure_;
 
   // The size of the packet we are targeting while doing path MTU discovery.
   QuicByteCount mtu_discovery_target_;

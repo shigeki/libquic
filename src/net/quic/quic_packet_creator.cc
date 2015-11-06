@@ -9,9 +9,9 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "net/quic/crypto/quic_random.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_data_writer.h"
 #include "net/quic/quic_fec_group.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 
 using base::StringPiece;
@@ -76,7 +76,6 @@ QuicPacketCreator::QuicPacketCreator(QuicConnectionId connection_id,
       random_bool_source_(new QuicRandomBoolSource(random_generator)),
       packet_number_(0),
       should_fec_protect_(false),
-      fec_group_number_(0),
       send_version_in_packet_(framer->perspective() == Perspective::IS_CLIENT),
       max_packet_length_(0),
       max_packets_per_fec_group_(kDefaultMaxPacketsPerFecGroup),
@@ -130,6 +129,10 @@ void QuicPacketCreator::set_max_packets_per_fec_group(
   DCHECK_LT(0u, max_packets_per_fec_group_);
 }
 
+QuicFecGroupNumber QuicPacketCreator::fec_group_number() {
+  return fec_group_ != nullptr ? fec_group_->FecGroupNumber() : 0;
+}
+
 bool QuicPacketCreator::ShouldSendFec(bool force_close) const {
   DCHECK(!HasPendingFrames());
   return fec_group_.get() != nullptr && fec_group_->NumReceivedPackets() > 0 &&
@@ -175,7 +178,6 @@ void QuicPacketCreator::StopFecProtectingPackets() {
   }
   DCHECK(should_fec_protect_);
   should_fec_protect_ = false;
-  fec_group_number_ = 0;
 }
 
 bool QuicPacketCreator::IsFecProtected() const {
@@ -205,8 +207,7 @@ InFecGroup QuicPacketCreator::MaybeUpdateLengthsAndStartFec() {
   }
   // Start a new FEC group since protection is on. Set the fec group number to
   // the packet number of the next packet.
-  fec_group_number_ = packet_number() + 1;
-  fec_group_.reset(new QuicFecGroup());
+  fec_group_.reset(new QuicFecGroup(packet_number_ + 1));
   return IN_FEC_GROUP;
 }
 
@@ -261,7 +262,7 @@ size_t QuicPacketCreator::StreamFramePacketOverhead(
 }
 
 size_t QuicPacketCreator::CreateStreamFrame(QuicStreamId id,
-                                            const QuicIOVector& iov,
+                                            QuicIOVector iov,
                                             size_t iov_offset,
                                             QuicStreamOffset offset,
                                             bool fin,
@@ -302,7 +303,7 @@ size_t QuicPacketCreator::CreateStreamFrame(QuicStreamId id,
 }
 
 // static
-void QuicPacketCreator::CopyToBuffer(const QuicIOVector& iov,
+void QuicPacketCreator::CopyToBuffer(QuicIOVector iov,
                                      size_t iov_offset,
                                      size_t length,
                                      char* buffer) {
@@ -311,14 +312,56 @@ void QuicPacketCreator::CopyToBuffer(const QuicIOVector& iov,
     iov_offset -= iov.iov[iovnum].iov_len;
     ++iovnum;
   }
-  while (iovnum < iov.iov_count && length > 0) {
-    const size_t copy_len = min(length, iov.iov[iovnum].iov_len - iov_offset);
-    memcpy(buffer, static_cast<char*>(iov.iov[iovnum].iov_base) + iov_offset,
-           copy_len);
-    iov_offset = 0;
-    length -= copy_len;
-    buffer += copy_len;
-    ++iovnum;
+  DCHECK_LE(iovnum, iov.iov_count);
+  DCHECK_LE(iov_offset, iov.iov[iovnum].iov_len);
+  if (FLAGS_quic_packet_creator_prefetch) {
+    if (iovnum >= iov.iov_count || length == 0) {
+      return;
+    }
+
+    // Unroll the first iteration that handles iov_offset.
+    const size_t iov_available = iov.iov[iovnum].iov_len - iov_offset;
+    size_t copy_len = min(length, iov_available);
+
+    // Try to prefetch the next iov if there is at least one more after the
+    // current. Otherwise, it looks like an irregular access that the hardware
+    // prefetcher won't speculatively prefetch. Only prefetch one iov because
+    // generally, the iov_offset is not 0, input iov consists of 2K buffers and
+    // the output buffer is ~1.4K.
+    if (copy_len == iov_available && iovnum + 1 < iov.iov_count) {
+      // TODO(ckrasic) - this is unused without prefetch()
+      // char* next_base = static_cast<char*>(iov.iov[iovnum + 1].iov_base);
+      // Prefetch 2 cachelines worth of data to get the prefetcher started;
+      // leave it to the hardware prefetcher after that.
+      // TODO(ckrasic) - investigate what to do about prefetch directives.
+      // prefetch(next_base, PREFETCH_HINT_T0);
+      if (iov.iov[iovnum + 1].iov_len >= 64) {
+        // TODO(ckrasic) - investigate what to do about prefetch directives.
+        // prefetch(next_base + CACHELINE_SIZE, PREFETCH_HINT_T0);
+      }
+    }
+
+    const char* src = static_cast<char*>(iov.iov[iovnum].iov_base) + iov_offset;
+    while (true) {
+      memcpy(buffer, src, copy_len);
+      length -= copy_len;
+      buffer += copy_len;
+      if (length == 0 || ++iovnum >= iov.iov_count) {
+        break;
+      }
+      src = static_cast<char*>(iov.iov[iovnum].iov_base);
+      copy_len = min(length, iov.iov[iovnum].iov_len);
+    }
+  } else {
+    while (iovnum < iov.iov_count && length > 0) {
+      const size_t copy_len = min(length, iov.iov[iovnum].iov_len - iov_offset);
+      memcpy(buffer, static_cast<char*>(iov.iov[iovnum].iov_base) + iov_offset,
+             copy_len);
+      iov_offset = 0;
+      length -= copy_len;
+      buffer += copy_len;
+      ++iovnum;
+    }
   }
   LOG_IF(DFATAL, length > 0) << "Failed to copy entire length to buffer.";
 }
@@ -437,9 +480,12 @@ SerializedPacket QuicPacketCreator::SerializePacket(
   DCHECK_LT(0u, encrypted_buffer_len);
   LOG_IF(DFATAL, queued_frames_.empty())
       << "Attempt to serialize empty packet";
-  DCHECK_GE(packet_number_ + 1, fec_group_number_);
+  if (fec_group_.get() != nullptr) {
+    DCHECK_GE(packet_number_ + 1, fec_group_->FecGroupNumber());
+  }
   QuicPacketHeader header;
-  FillPacketHeader(should_fec_protect_ ? fec_group_number_ : 0, false, &header);
+  // FillPacketHeader increments packet_number_.
+  FillPacketHeader(fec_group_number(), false, &header);
 
   MaybeAddPadding();
 
@@ -456,37 +502,36 @@ SerializedPacket QuicPacketCreator::SerializePacket(
   // TODO(rtenneti): Change the default 64 alignas value (used the default
   // value from CACHELINE_SIZE).
   ALIGNAS(64) char buffer[kMaxPacketSize];
-  scoped_ptr<QuicPacket> packet;
   // Use the packet_size_ instead of the buffer size to ensure smaller
   // packet sizes are properly used.
-  scoped_ptr<char[]> large_buffer;
-  if (packet_size_ <= kMaxPacketSize) {
-    packet.reset(
-        framer_->BuildDataPacket(header, queued_frames_, buffer, packet_size_));
-  } else {
-    large_buffer.reset(new char[packet_size_]);
-    packet.reset(framer_->BuildDataPacket(header, queued_frames_,
-                                          large_buffer.get(), packet_size_));
-  }
-  if (packet == nullptr) {
+  size_t length =
+      framer_->BuildDataPacket(header, queued_frames_, buffer, packet_size_);
+  if (length == 0) {
     LOG(DFATAL) << "Failed to serialize " << queued_frames_.size()
                 << " frames.";
     return NoPacket();
   }
 
-  OnBuiltFecProtectedPayload(header, packet->FecProtectedData());
+  // TODO(ianswett) Consider replacing QuicPacket with something else,
+  // since it's only used to provide convenience methods to FEC and encryption.
+  QuicPacket packet(buffer, length,
+                    /* owns_buffer */ false,
+                    header.public_header.connection_id_length,
+                    header.public_header.version_flag,
+                    header.public_header.packet_number_length);
+  OnBuiltFecProtectedPayload(header, packet.FecProtectedData());
 
   // Because of possible truncation, we can't be confident that our
   // packet size calculation worked correctly.
   if (!possibly_truncated_by_length) {
-    DCHECK_EQ(packet_size_, packet->length());
+    DCHECK_EQ(packet_size_, length);
   }
   // Immediately encrypt the packet, to ensure we don't encrypt the same packet
   // packet number multiple times.
-  QuicEncryptedPacket* encrypted =
-      framer_->EncryptPayload(encryption_level_, packet_number_, *packet,
+  size_t encrypted_length =
+      framer_->EncryptPayload(encryption_level_, packet_number_, packet,
                               encrypted_buffer, encrypted_buffer_len);
-  if (encrypted == nullptr) {
+  if (encrypted_length == 0) {
     LOG(DFATAL) << "Failed to encrypt packet number " << packet_number_;
     return NoPacket();
   }
@@ -510,8 +555,9 @@ SerializedPacket QuicPacketCreator::SerializePacket(
   queued_frames_.clear();
   needs_padding_ = false;
   return SerializedPacket(
-      header.packet_packet_number, header.public_header.packet_number_length,
-      encrypted, QuicFramer::GetPacketEntropyHash(header),
+      header.packet_number, header.public_header.packet_number_length,
+      encrypted_buffer, encrypted_length, /* owns_buffer*/ false,
+      QuicFramer::GetPacketEntropyHash(header),
       queued_retransmittable_frames_.release(), has_ack, has_stop_waiting);
 }
 
@@ -525,28 +571,27 @@ SerializedPacket QuicPacketCreator::SerializeFec(char* buffer,
   }
   DCHECK_EQ(0u, queued_frames_.size());
   QuicPacketHeader header;
-  FillPacketHeader(fec_group_number_, true, &header);
-  QuicFecData fec_data;
-  fec_data.fec_group = fec_group_->min_protected_packet();
-  fec_data.redundancy = fec_group_->payload_parity();
-  scoped_ptr<QuicPacket> packet(framer_->BuildFecPacket(header, fec_data));
+  FillPacketHeader(fec_group_->FecGroupNumber(), true, &header);
+  scoped_ptr<QuicPacket> packet(
+      framer_->BuildFecPacket(header, fec_group_->PayloadParity()));
   fec_group_.reset(nullptr);
   packet_size_ = 0;
   LOG_IF(DFATAL, packet == nullptr)
-      << "Failed to serialize fec packet for group:" << fec_data.fec_group;
+      << "Failed to serialize fec packet for group:"
+      << fec_group_->FecGroupNumber();
   DCHECK_GE(max_packet_length_, packet->length());
   // Immediately encrypt the packet, to ensure we don't encrypt the same packet
   // packet number multiple times.
-  QuicEncryptedPacket* encrypted = framer_->EncryptPayload(
+  size_t encrypted_length = framer_->EncryptPayload(
       encryption_level_, packet_number_, *packet, buffer, buffer_len);
-  if (encrypted == nullptr) {
+  if (encrypted_length == 0) {
     LOG(DFATAL) << "Failed to encrypt packet number " << packet_number_;
     return NoPacket();
   }
   SerializedPacket serialized(
-      header.packet_packet_number, header.public_header.packet_number_length,
-      encrypted, QuicFramer::GetPacketEntropyHash(header), nullptr, false,
-      false);
+      header.packet_number, header.public_header.packet_number_length, buffer,
+      encrypted_length, /* owns_buffer */ false,
+      QuicFramer::GetPacketEntropyHash(header), nullptr, false, false);
   serialized.is_fec_packet = true;
   return serialized;
 }
@@ -579,7 +624,7 @@ void QuicPacketCreator::FillPacketHeader(QuicFecGroupNumber fec_group,
   header->public_header.reset_flag = false;
   header->public_header.version_flag = send_version_in_packet_;
   header->fec_flag = fec_flag;
-  header->packet_packet_number = ++packet_number_;
+  header->packet_number = ++packet_number_;
   header->public_header.packet_number_length = packet_number_length_;
   header->entropy_flag = random_bool_source_->RandBool();
   header->is_in_fec_group = fec_group == 0 ? NOT_IN_FEC_GROUP : IN_FEC_GROUP;

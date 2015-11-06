@@ -147,7 +147,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // |proof_source|: provides certificate chains and signatures. This class
   //     takes ownership of |proof_source|.
   QuicCryptoServerConfig(base::StringPiece source_address_token_secret,
-                         QuicRandom* server_nonce_entropy);
+                         QuicRandom* server_nonce_entropy,
+                         ProofSource* proof_source);
   ~QuicCryptoServerConfig();
 
   // TESTING is a magic parameter for passing to the constructor in tests.
@@ -270,6 +271,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   //
   // |cached_network_params| is optional, and can be nullptr.
   bool BuildServerConfigUpdateMessage(
+      QuicVersion version,
       const SourceAddressTokens& previous_source_address_tokens,
       const IPAddressNumber& server_ip,
       const IPAddressNumber& client_ip,
@@ -278,10 +280,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const QuicCryptoNegotiatedParameters& params,
       const CachedNetworkParameters* cached_network_params,
       CryptoHandshakeMessage* out) const;
-
-  // SetProofSource installs |proof_source| as the ProofSource for handshakes.
-  // This object takes ownership of |proof_source|.
-  void SetProofSource(ProofSource* proof_source);
 
   // SetEphemeralKeySource installs an object that can cache ephemeral keys for
   // a short period of time. This object takes ownership of
@@ -341,11 +339,12 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // uniqueness.
   void set_server_nonce_strike_register_window_secs(uint32 window_secs);
 
+  // set_enable_serving_sct enables or disables serving signed cert timestamp
+  // (RFC6962) in server hello.
+  void set_enable_serving_sct(bool enable_serving_sct);
+
   // Set and take ownership of the callback to invoke on primary config changes.
   void AcquirePrimaryConfigChangedCb(PrimaryConfigChangedCallback* cb);
-
-  // Returns true if this config has a |proof_source_|.
-  bool HasProofSource() const;
 
   // Returns the number of configs this object owns.
   int NumberOfConfigs() const;
@@ -444,7 +443,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       ValidateClientHelloResultCallback* done_cb) const;
 
   // BuildRejection sets |out| to be a REJ message in reply to |client_hello|.
-  void BuildRejection(const Config& config,
+  void BuildRejection(QuicVersion version,
+                      const Config& config,
                       const CryptoHandshakeMessage& client_hello,
                       const ClientHelloInfo& info,
                       const CachedNetworkParameters& cached_network_params,
@@ -598,6 +598,9 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   uint32 source_address_token_lifetime_secs_;
   uint32 server_nonce_strike_register_max_entries_;
   uint32 server_nonce_strike_register_window_secs_;
+
+  // Enable serving SCT or not.
+  bool enable_serving_sct_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoServerConfig);
 };

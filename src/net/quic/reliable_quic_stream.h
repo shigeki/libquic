@@ -27,7 +27,6 @@
 #include "base/strings/string_piece.h"
 #include "net/base/iovec.h"
 #include "net/base/net_export.h"
-#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_flow_controller.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_stream_sequencer.h"
@@ -101,7 +100,9 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   QuicRstStreamErrorCode stream_error() const { return stream_error_; }
   QuicErrorCode connection_error() const { return connection_error_; }
 
-  bool read_side_closed() const { return read_side_closed_; }
+  bool reading_stopped() const {
+    return sequencer_.ignore_read_data() || read_side_closed_;
+  }
   bool write_side_closed() const { return write_side_closed_; }
 
   uint64 stream_bytes_read() const { return stream_bytes_read_; }
@@ -112,6 +113,9 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
 
   void set_fec_policy(FecPolicy fec_policy) { fec_policy_ = fec_policy; }
   FecPolicy fec_policy() const { return fec_policy_; }
+
+  void set_rst_received(bool rst_received) { rst_received_ = rst_received; }
+  void set_stream_error(QuicRstStreamErrorCode error) { stream_error_ = error; }
 
   // Adjust the flow control window according to new offset in |frame|.
   virtual void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame);
@@ -138,7 +142,7 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   // it was blocked before.
   void UpdateSendWindowOffset(QuicStreamOffset new_offset);
 
-  // Returns true if the stream have received either a RST_STREAM or a FIN -
+  // Returns true if the stream has received either a RST_STREAM or a FIN -
   // either of which gives a definitive number of bytes which the peer has
   // sent. If this is not true on deletion of the stream object, the session
   // must keep track of the stream's byte offset until a definitive final value
@@ -155,6 +159,14 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
 
   bool fin_received() const { return fin_received_; }
 
+  // Sets the sequencer to consume all incoming data itself and not call
+  // OnDataAvailable().
+  // When the FIN is received, the stream will be notified automatically (via
+  // OnFinRead()) (which may happen during the call of StopReading()).
+  // TODO(dworley): There should be machinery to send a RST_STREAM/NO_ERROR and
+  // stop sending stream-level flow-control updates when this end sends FIN.
+  virtual void StopReading();
+
  protected:
   // Sends as much of 'data' to the connection as the connection will consume,
   // and then buffers any remaining data in queued_data_.
@@ -162,22 +174,17 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   // write_side_closed() becomes true, otherwise fin_buffered_ becomes true.
   void WriteOrBufferData(base::StringPiece data,
                          bool fin,
-                         QuicAckListenerInterface* ack_notifier_delegate);
+                         QuicAckListenerInterface* ack_listener);
 
   // Sends as many bytes in the first |count| buffers of |iov| to the connection
   // as the connection will consume.
-  // If |ack_notifier_delegate| is provided, then it will be notified once all
+  // If |ack_listener| is provided, then it will be notified once all
   // the ACKs for this write have been received.
   // Returns the number of bytes consumed by the connection.
   QuicConsumedData WritevData(const struct iovec* iov,
                               int iov_count,
                               bool fin,
-                              QuicAckListenerInterface* ack_notifier_delegate);
-
-  // Close the read side of the stream.  Further incoming stream frames will be
-  // discarded.  Can be called by the subclass or internally.
-  // May cause the stream to be closed.
-  virtual void CloseReadSide();
+                              QuicAckListenerInterface* ack_listener);
 
   // Close the write side of the socket.  Further writes will fail.
   // Can be called by the subclass or internally.
@@ -202,20 +209,25 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
  private:
   friend class test::ReliableQuicStreamPeer;
   friend class QuicStreamUtils;
-  class ProxyAckNotifierDelegate;
+
+  // Close the read side of the socket.  May cause the stream to be closed.
+  // Subclasses and consumers should use StopReading to terminate reading early.
+  void CloseReadSide();
+
+  // Subclasses and consumers should use reading_stopped.
+  bool read_side_closed() const { return read_side_closed_; }
 
   struct PendingData {
-    PendingData(std::string data_in,
-                scoped_refptr<ProxyAckNotifierDelegate> delegate_in);
+    PendingData(std::string data_in, QuicAckListenerInterface* ack_listener_in);
     ~PendingData();
 
     // Pending data to be written.
     std::string data;
     // Index of the first byte in data still to be written.
     size_t offset;
-    // Delegate that should be notified when the pending data is acked.
+    // AckListener that should be notified when the pending data is acked.
     // Can be nullptr.
-    scoped_refptr<ProxyAckNotifierDelegate> delegate;
+    scoped_refptr<QuicAckListenerInterface> ack_listener;
   };
 
   // Calls MaybeSendBlocked on the stream's flow controller and the connection

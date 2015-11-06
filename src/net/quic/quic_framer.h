@@ -145,7 +145,7 @@ class NET_EXPORT_PRIVATE QuicFramerVisitorInterface {
   virtual bool OnBlockedFrame(const QuicBlockedFrame& frame) = 0;
 
   // Called when FEC data has been parsed.
-  virtual void OnFecData(const QuicFecData& fec) = 0;
+  virtual void OnFecData(base::StringPiece redundancy) = 0;
 
   // Called when a packet has been completely processed.
   virtual void OnPacketComplete() = 0;
@@ -286,19 +286,19 @@ class NET_EXPORT_PRIVATE QuicFramer {
       bool includes_version,
       QuicPacketNumberLength packet_number_length);
 
-  // Returns a QuicPacket* that is owned by the caller, is created from
-  // |frames|.  Returns nullptr if the packet could not be created.
-  // The packet must be of size |packet_size|.
-  QuicPacket* BuildDataPacket(const QuicPacketHeader& header,
-                              const QuicFrames& frames,
-                              char* buffer,
-                              size_t packet_length);
+  // Serializes a packet containing |frames| into |buffer|.
+  // Returns the length of the packet, which must not be longer than
+  // |packet_length|.  Returns 0 if it fails to serialize.
+  size_t BuildDataPacket(const QuicPacketHeader& header,
+                         const QuicFrames& frames,
+                         char* buffer,
+                         size_t packet_length);
 
   // Returns a QuicPacket* that is owned by the caller, and is populated with
   // the fields in |header| and |fec|.  Returns nullptr if the packet could
   // not be created.
   QuicPacket* BuildFecPacket(const QuicPacketHeader& header,
-                             const QuicFecData& fec);
+                             base::StringPiece redundancy);
 
   // Returns a new public reset packet, owned by the caller.
   static QuicEncryptedPacket* BuildPublicResetPacket(
@@ -332,14 +332,13 @@ class NET_EXPORT_PRIVATE QuicFramer {
   // takes ownership of |encrypter|.
   void SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter);
 
-  // Returns a new encrypted packet, owned by the caller.
-  // Encrypts into |buffer| if |buffer_len| is long enough, and otherwise
-  // constructs a new buffer owned by the EncryptedPacket.
-  QuicEncryptedPacket* EncryptPayload(EncryptionLevel level,
-                                      QuicPacketNumber packet_number,
-                                      const QuicPacket& packet,
-                                      char* buffer,
-                                      size_t buffer_len);
+  // Returns the length of the data encrypted into |buffer| if |buffer_len| is
+  // long enough, and otherwise 0.
+  size_t EncryptPayload(EncryptionLevel level,
+                        QuicPacketNumber packet_number,
+                        const QuicPacket& packet,
+                        char* buffer,
+                        size_t buffer_len);
 
   // Returns the maximum length of plaintext that can be encrypted
   // to ciphertext no larger than |ciphertext_size|.
@@ -436,7 +435,7 @@ class NET_EXPORT_PRIVATE QuicFramer {
   // wire format version and the last seen packet number.
   QuicPacketNumber CalculatePacketNumberFromWire(
       QuicPacketNumberLength packet_number_length,
-      QuicPacketNumber packet_packet_number) const;
+      QuicPacketNumber packet_number) const;
 
   // Returns the QuicTime::Delta corresponding to the time from when the framer
   // was created.
@@ -454,7 +453,7 @@ class NET_EXPORT_PRIVATE QuicFramer {
 
   static bool AppendPacketSequenceNumber(
       QuicPacketNumberLength packet_number_length,
-      QuicPacketNumber packet_packet_number,
+      QuicPacketNumber packet_number,
       QuicDataWriter* writer);
 
   static uint8 GetSequenceNumberFlags(

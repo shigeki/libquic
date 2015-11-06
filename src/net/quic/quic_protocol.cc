@@ -68,7 +68,7 @@ QuicPacketPublicHeader::QuicPacketPublicHeader(
 QuicPacketPublicHeader::~QuicPacketPublicHeader() {}
 
 QuicPacketHeader::QuicPacketHeader()
-    : packet_packet_number(0),
+    : packet_number(0),
       fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
@@ -77,7 +77,7 @@ QuicPacketHeader::QuicPacketHeader()
 
 QuicPacketHeader::QuicPacketHeader(const QuicPacketPublicHeader& header)
     : public_header(header),
-      packet_packet_number(0),
+      packet_number(0),
       fec_flag(false),
       entropy_flag(false),
       entropy_hash(0),
@@ -134,8 +134,6 @@ QuicVersionVector QuicSupportedVersions() {
 
 QuicTag QuicVersionToQuicTag(const QuicVersion version) {
   switch (version) {
-    case QUIC_VERSION_24:
-      return MakeQuicTag('Q', '0', '2', '4');
     case QUIC_VERSION_25:
       return MakeQuicTag('Q', '0', '2', '5');
     case QUIC_VERSION_26:
@@ -144,6 +142,10 @@ QuicTag QuicVersionToQuicTag(const QuicVersion version) {
       return MakeQuicTag('Q', '0', '2', '7');
     case QUIC_VERSION_28:
       return MakeQuicTag('Q', '0', '2', '8');
+    case QUIC_VERSION_29:
+      return MakeQuicTag('Q', '0', '2', '9');
+    case QUIC_VERSION_30:
+      return MakeQuicTag('Q', '0', '3', '0');
     default:
       // This shold be an ERROR because we should never attempt to convert an
       // invalid QuicVersion to be written to the wire.
@@ -170,11 +172,12 @@ return #x
 
 string QuicVersionToString(const QuicVersion version) {
   switch (version) {
-    RETURN_STRING_LITERAL(QUIC_VERSION_24);
     RETURN_STRING_LITERAL(QUIC_VERSION_25);
     RETURN_STRING_LITERAL(QUIC_VERSION_26);
     RETURN_STRING_LITERAL(QUIC_VERSION_27);
     RETURN_STRING_LITERAL(QUIC_VERSION_28);
+    RETURN_STRING_LITERAL(QUIC_VERSION_29);
+    RETURN_STRING_LITERAL(QUIC_VERSION_30);
     default:
       return "QUIC_VERSION_UNSUPPORTED";
   }
@@ -215,7 +218,7 @@ ostream& operator<<(ostream& os, const QuicPacketHeader& header) {
   os << ", fec_flag: " << header.fec_flag
      << ", entropy_flag: " << header.entropy_flag
      << ", entropy hash: " << static_cast<int>(header.entropy_hash)
-     << ", packet_number: " << header.packet_packet_number
+     << ", packet_number: " << header.packet_number
      << ", is_in_fec_group:" << header.is_in_fec_group
      << ", fec_group: " << header.fec_group << "}\n";
   return os;
@@ -236,15 +239,15 @@ QuicStopWaitingFrame::~QuicStopWaitingFrame() {}
 
 QuicAckFrame::QuicAckFrame()
     : entropy_hash(0),
+      is_truncated(false),
       largest_observed(0),
       delta_time_largest_observed(QuicTime::Delta::Infinite()),
-      is_truncated(false) {}
+      latest_revived_packet(0) {}
 
 QuicAckFrame::~QuicAckFrame() {}
 
-QuicRstStreamErrorCode AdjustErrorForVersion(
-    QuicRstStreamErrorCode error_code,
-    QuicVersion version) {
+QuicRstStreamErrorCode AdjustErrorForVersion(QuicRstStreamErrorCode error_code,
+                                             QuicVersion /*version*/) {
   return error_code;
 }
 
@@ -298,8 +301,6 @@ QuicFrame::QuicFrame(QuicWindowUpdateFrame* frame)
 QuicFrame::QuicFrame(QuicBlockedFrame* frame)
     : type(BLOCKED_FRAME), blocked_frame(frame) {}
 
-QuicFecData::QuicFecData() : fec_group(0) {}
-
 ostream& operator<<(ostream& os, const QuicStopWaitingFrame& sent_info) {
   os << "entropy_hash: " << static_cast<int>(sent_info.entropy_hash)
      << " least_unacked: " << sent_info.least_unacked;
@@ -307,17 +308,10 @@ ostream& operator<<(ostream& os, const QuicStopWaitingFrame& sent_info) {
 }
 
 PacketNumberQueue::const_iterator::const_iterator(
-    PacketNumberSet::const_iterator set_iter)
-    : use_interval_set_(false), set_iter_(set_iter) {}
-
-PacketNumberQueue::const_iterator::const_iterator(
     IntervalSet<QuicPacketNumber>::const_iterator interval_set_iter,
     QuicPacketNumber first,
     QuicPacketNumber last)
-    : use_interval_set_(true),
-      interval_set_iter_(interval_set_iter),
-      current_(first),
-      last_(last) {}
+    : interval_set_iter_(interval_set_iter), current_(first), last_(last) {}
 
 PacketNumberQueue::const_iterator::const_iterator(const const_iterator& other) =
     default;
@@ -335,46 +329,30 @@ PacketNumberQueue::const_iterator& PacketNumberQueue::const_iterator::operator=(
 
 bool PacketNumberQueue::const_iterator::operator!=(
     const const_iterator& other) const {
-  if (use_interval_set_) {
-    return current_ != other.current_;
-  } else {
-    return set_iter_ != other.set_iter_;
-  }
+  return current_ != other.current_;
 }
 
 bool PacketNumberQueue::const_iterator::operator==(
     const const_iterator& other) const {
-  if (use_interval_set_) {
-    return current_ == other.current_;
-  } else {
-    return set_iter_ == other.set_iter_;
-  }
+  return current_ == other.current_;
 }
 
 PacketNumberQueue::const_iterator::value_type
     PacketNumberQueue::const_iterator::
     operator*() const {
-  if (use_interval_set_) {
-    return current_;
-  } else {
-    return *set_iter_;
-  }
+  return current_;
 }
 
 PacketNumberQueue::const_iterator& PacketNumberQueue::const_iterator::
 operator++() {
-  if (use_interval_set_) {
-    ++current_;
-    if (current_ < last_) {
-      if (current_ >= interval_set_iter_->max()) {
-        ++interval_set_iter_;
-        current_ = interval_set_iter_->min();
-      }
-    } else {
-      current_ = last_;
+  ++current_;
+  if (current_ < last_) {
+    if (current_ >= interval_set_iter_->max()) {
+      ++interval_set_iter_;
+      current_ = interval_set_iter_->min();
     }
   } else {
-    ++set_iter_;
+    current_ = last_;
   }
   return *this;
 }
@@ -386,9 +364,7 @@ PacketNumberQueue::const_iterator PacketNumberQueue::const_iterator::operator++(
   return preincrement;
 }
 
-PacketNumberQueue::PacketNumberQueue()
-    : use_interval_set_(FLAGS_quic_packet_queue_use_interval_set) {}
-
+PacketNumberQueue::PacketNumberQueue() = default;
 PacketNumberQueue::PacketNumberQueue(const PacketNumberQueue& other) = default;
 // TODO(rtenneti): on windows RValue reference gives errors.
 // PacketNumberQueue::PacketNumberQueue(PacketNumberQueue&& other) = default;
@@ -401,143 +377,89 @@ PacketNumberQueue& PacketNumberQueue::operator=(
 //    default;
 
 void PacketNumberQueue::Add(QuicPacketNumber packet_number) {
-  if (use_interval_set_) {
-    packet_number_intervals_.Add(packet_number, packet_number + 1);
-  } else {
-    packet_number_set_.insert(packet_number);
-  }
+  packet_number_intervals_.Add(packet_number, packet_number + 1);
 }
 
 void PacketNumberQueue::Add(QuicPacketNumber lower, QuicPacketNumber higher) {
-  if (use_interval_set_) {
-    packet_number_intervals_.Add(lower, higher);
-  } else {
-    for (QuicPacketNumber packet_number = lower; packet_number < higher;
-         ++packet_number) {
-      Add(packet_number);
-    }
-  }
+  packet_number_intervals_.Add(lower, higher);
 }
 
 void PacketNumberQueue::Remove(QuicPacketNumber packet_number) {
-  if (use_interval_set_) {
-    packet_number_intervals_.Difference(packet_number, packet_number + 1);
-  } else {
-    packet_number_set_.erase(packet_number);
-  }
+  packet_number_intervals_.Difference(packet_number, packet_number + 1);
 }
 
 bool PacketNumberQueue::RemoveUpTo(QuicPacketNumber higher) {
-  if (use_interval_set_) {
-    if (Empty()) {
-      return false;
-    }
-    const QuicPacketNumber old_min = Min();
-    packet_number_intervals_.Difference(0, higher);
-    return Empty() || old_min != Min();
-  } else {
-    const size_t orig_size = packet_number_set_.size();
-    packet_number_set_.erase(packet_number_set_.begin(),
-                             packet_number_set_.lower_bound(higher));
-    return orig_size != packet_number_set_.size();
+  if (Empty()) {
+    return false;
   }
+  const QuicPacketNumber old_min = Min();
+  packet_number_intervals_.Difference(0, higher);
+  return Empty() || old_min != Min();
 }
 
 bool PacketNumberQueue::Contains(QuicPacketNumber packet_number) const {
-  if (use_interval_set_) {
-    return packet_number_intervals_.Contains(packet_number);
-  } else {
-    return ContainsKey(packet_number_set_, packet_number);
-  }
+  return packet_number_intervals_.Contains(packet_number);
 }
 
 bool PacketNumberQueue::Empty() const {
-  if (use_interval_set_) {
-    return packet_number_intervals_.Empty();
-  } else {
-    return packet_number_set_.empty();
-  }
+  return packet_number_intervals_.Empty();
 }
 
 QuicPacketNumber PacketNumberQueue::Min() const {
   DCHECK(!Empty());
-  if (use_interval_set_) {
-    return packet_number_intervals_.begin()->min();
-  } else {
-    return *packet_number_set_.begin();
-  }
+  return packet_number_intervals_.begin()->min();
 }
 
 QuicPacketNumber PacketNumberQueue::Max() const {
   DCHECK(!Empty());
-  if (use_interval_set_) {
-    return packet_number_intervals_.rbegin()->max() - 1;
-  } else {
-    return *packet_number_set_.rbegin();
-  }
+  return packet_number_intervals_.rbegin()->max() - 1;
 }
 
 size_t PacketNumberQueue::NumPacketsSlow() const {
-  if (use_interval_set_) {
-    size_t num_packets = 0;
-    for (const auto& interval : packet_number_intervals_) {
-      num_packets += interval.Length();
-    }
-    return num_packets;
-  } else {
-    return packet_number_set_.size();
+  size_t num_packets = 0;
+  for (const auto& interval : packet_number_intervals_) {
+    num_packets += interval.Length();
   }
+  return num_packets;
 }
 
 PacketNumberQueue::const_iterator PacketNumberQueue::begin() const {
-  if (use_interval_set_) {
-    QuicPacketNumber first;
-    QuicPacketNumber last;
-    if (packet_number_intervals_.Empty()) {
-      first = 0;
-      last = 0;
-    } else {
-      first = packet_number_intervals_.begin()->min();
-      last = packet_number_intervals_.rbegin()->max();
-    }
-    return const_iterator(packet_number_intervals_.begin(), first, last);
+  QuicPacketNumber first;
+  QuicPacketNumber last;
+  if (packet_number_intervals_.Empty()) {
+    first = 0;
+    last = 0;
   } else {
-    return const_iterator(packet_number_set_.begin());
+    first = packet_number_intervals_.begin()->min();
+    last = packet_number_intervals_.rbegin()->max();
   }
+  return const_iterator(packet_number_intervals_.begin(), first, last);
 }
 
 PacketNumberQueue::const_iterator PacketNumberQueue::end() const {
-  if (use_interval_set_) {
-    QuicPacketNumber last = packet_number_intervals_.Empty()
-                                ? 0
-                                : packet_number_intervals_.rbegin()->max();
-    return const_iterator(packet_number_intervals_.end(), last, last);
-  } else {
-    return const_iterator(packet_number_set_.end());
-  }
+  QuicPacketNumber last = packet_number_intervals_.Empty()
+                              ? 0
+                              : packet_number_intervals_.rbegin()->max();
+  return const_iterator(packet_number_intervals_.end(), last, last);
 }
 
 PacketNumberQueue::const_iterator PacketNumberQueue::lower_bound(
     QuicPacketNumber packet_number) const {
-  if (use_interval_set_) {
-    QuicPacketNumber first;
-    QuicPacketNumber last;
-    if (packet_number_intervals_.Empty()) {
-      first = 0;
-      last = 0;
-      return const_iterator(packet_number_intervals_.begin(), first, last);
-    }
-    if (!packet_number_intervals_.Contains(packet_number)) {
-      return end();
-    }
-    IntervalSet<QuicPacketNumber>::const_iterator it =
-        packet_number_intervals_.Find(packet_number);
-    first = packet_number;
-    last = packet_number_intervals_.rbegin()->max();
-    return const_iterator(it, first, last);
-  } else {
-    return const_iterator(packet_number_set_.lower_bound(packet_number));
+  QuicPacketNumber first;
+  QuicPacketNumber last;
+  if (packet_number_intervals_.Empty()) {
+    first = 0;
+    last = 0;
+    return const_iterator(packet_number_intervals_.begin(), first, last);
   }
+  if (!packet_number_intervals_.Contains(packet_number)) {
+    return end();
+  }
+  IntervalSet<QuicPacketNumber>::const_iterator it =
+      packet_number_intervals_.Find(packet_number);
+  first = packet_number;
+  last = packet_number_intervals_.rbegin()->max();
+  return const_iterator(it, first, last);
 }
 
 ostream& operator<<(ostream& os, const PacketNumberQueue& q) {
@@ -553,17 +475,12 @@ ostream& operator<<(ostream& os, const QuicAckFrame& ack_frame) {
      << " delta_time_largest_observed: "
      << ack_frame.delta_time_largest_observed.ToMicroseconds()
      << " missing_packets: [ " << ack_frame.missing_packets
-     << " ] is_truncated: " << ack_frame.is_truncated;
-  os << " revived_packets: [ ";
-  for (PacketNumberSet::const_iterator it = ack_frame.revived_packets.begin();
-       it != ack_frame.revived_packets.end(); ++it) {
-    os << *it << " ";
-  }
-  os << " ] received_packets: [ ";
-  for (PacketTimeList::const_iterator it =
-           ack_frame.received_packet_times.begin();
-           it != ack_frame.received_packet_times.end(); ++it) {
-    os << it->first << " at " << it->second.ToDebuggingValue() << " ";
+     << " ] is_truncated: " << ack_frame.is_truncated
+     << " revived_packet: " << ack_frame.latest_revived_packet
+     << " received_packets: [ ";
+  for (const std::pair<QuicPacketNumber, QuicTime>& p :
+       ack_frame.received_packet_times) {
+    os << p.first << " at " << p.second.ToDebuggingValue() << " ";
   }
   os << " ]";
   return os;
@@ -626,8 +543,7 @@ ostream& operator<<(ostream& os, const QuicFrame& frame) {
 
 ostream& operator<<(ostream& os, const QuicRstStreamFrame& rst_frame) {
   os << "stream_id { " << rst_frame.stream_id << " } "
-     << "error_code { " << rst_frame.error_code << " } "
-     << "error_details { " << rst_frame.error_details << " }\n";
+     << "error_code { " << rst_frame.error_code << " }\n";
   return os;
 }
 
@@ -837,6 +753,14 @@ void RetransmittableFrames::RemoveFramesForStream(QuicStreamId stream_id) {
   }
 }
 
+AckListenerWrapper::AckListenerWrapper(QuicAckListenerInterface* listener,
+                                       QuicPacketLength data_length)
+    : ack_listener(listener), length(data_length) {
+  DCHECK(listener != nullptr);
+}
+
+AckListenerWrapper::~AckListenerWrapper() {}
+
 SerializedPacket::SerializedPacket(
     QuicPacketNumber packet_number,
     QuicPacketNumberLength packet_number_length,
@@ -853,6 +777,26 @@ SerializedPacket::SerializedPacket(
       is_fec_packet(false),
       has_ack(has_ack),
       has_stop_waiting(has_stop_waiting) {}
+
+SerializedPacket::SerializedPacket(
+    QuicPacketNumber packet_number,
+    QuicPacketNumberLength packet_number_length,
+    char* encrypted_buffer,
+    size_t encrypted_length,
+    bool owns_buffer,
+    QuicPacketEntropyHash entropy_hash,
+    RetransmittableFrames* retransmittable_frames,
+    bool has_ack,
+    bool has_stop_waiting)
+    : SerializedPacket(packet_number,
+                       packet_number_length,
+                       new QuicEncryptedPacket(encrypted_buffer,
+                                               encrypted_length,
+                                               owns_buffer),
+                       entropy_hash,
+                       retransmittable_frames,
+                       has_ack,
+                       has_stop_waiting) {}
 
 SerializedPacket::~SerializedPacket() {}
 
@@ -896,5 +840,7 @@ TransmissionInfo::TransmissionInfo(
       is_unackable(false),
       is_fec_packet(is_fec_packet),
       all_transmissions(nullptr) {}
+
+TransmissionInfo::~TransmissionInfo() {}
 
 }  // namespace net
