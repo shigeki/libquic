@@ -70,13 +70,13 @@ set(
 	src/net/quic/quic_protocol.cc
 	src/net/quic/quic_packet_generator.cc
 	src/net/quic/quic_flow_controller.cc
-	src/net/quic/quic_ack_notifier_manager.cc
 	src/net/quic/quic_connection_stats.cc
 	src/net/quic/quic_fec_group.cc
 	src/net/quic/quic_data_writer.cc
 	src/net/quic/quic_data_reader.cc
 	src/net/quic/quic_session.cc
 	src/net/quic/quic_spdy_session.cc
+	src/net/quic/quic_spdy_stream.cc
 	src/net/quic/iovector.cc
 	src/net/quic/quic_stream_sequencer.cc
 	src/net/quic/quic_framer.cc
@@ -91,7 +91,6 @@ set(
 	src/net/quic/quic_crypto_stream.cc
 	src/net/quic/quic_socket_address_coder.cc
 	src/net/quic/quic_utils.cc
-	src/net/quic/quic_ack_notifier.cc
 	src/net/quic/crypto/quic_crypto_server_config.cc
 	src/net/quic/crypto/crypto_handshake_message.cc
 	src/net/quic/crypto/p256_key_exchange_openssl.cc
@@ -121,7 +120,6 @@ set(
 	src/net/quic/crypto/quic_encrypter.cc
 	src/net/quic/crypto/quic_crypto_client_config.cc
 	src/net/quic/quic_clock.cc
-	src/net/quic/quic_data_stream.cc
 	src/net/quic/quic_alarm.cc
 	src/net/quic/quic_sent_entropy_manager.cc
 	src/net/quic/congestion_control/pacing_sender.cc
